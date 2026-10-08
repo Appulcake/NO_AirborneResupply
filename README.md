@@ -5,6 +5,8 @@ capable of refuelling and/or rearming players while in the air. Resupply works b
 altitude (by default 5m), upon which service completes and the logistics pilot is rewarded (for both 
 refuel and rearming).
 
+https://github.com/user-attachments/assets/f0816ad4-3795-4eac-8391-a932d1761855
+
 Mod is needed on server and client, but should be safe to have on client when joining servers that don't 
 have it (it'll just not do anything).
 
