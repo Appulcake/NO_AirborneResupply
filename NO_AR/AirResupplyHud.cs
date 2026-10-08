@@ -12,6 +12,7 @@ internal static class AirResupplyHud
     private const string HudObjectName = "NO_AR_AirResupplyHud";
     private const float DynamicRefreshInterval = 0.1f;
     private const int LowSupplyWarningPercent = 20;
+    private const float HudStateExpirySeconds = 30f;
     private static AirResupplyHudStateMessage _state;
     private static float _receivedAt = -1000f;
     private static float _nextDynamicRefresh;
@@ -23,7 +24,6 @@ internal static class AirResupplyHud
     private static TextMeshProUGUI? _text;
     private static bool _initialised;
     private static bool _hudAllowed;
-    private const float HudStateExpirySeconds = 30f;
     
     internal static void Initialise()
     {

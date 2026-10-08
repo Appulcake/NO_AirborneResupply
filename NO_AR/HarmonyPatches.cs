@@ -46,6 +46,7 @@ internal static class HarmonyPatches
     {
         ProviderSelectionUi.ResetSession();
         ProviderClientRoleState.Clear();
+        AirResupplyNetworking.ResetClientProtocolState();
     }
     
     [HarmonyPatch(typeof(NetworkMission), nameof(NetworkMission.ClientStarted))]

@@ -9,6 +9,10 @@ internal static class AirResupplyManager
     private const float OverrideRatio = -1f;
     private const float Epsilon = 0.001f;
     private const float MapStatusSyncInterval = 10f;
+    
+    // Diagnostics
+    private const bool DiagnosticLogging = false;
+    
     private static readonly HashSet<Aircraft> TrackedAircraft = [];
     private static readonly Dictionary<Aircraft, ProviderState> Providers = new();
     private static readonly Dictionary<Aircraft, ReceiverSession> ReceiverSessions = new();
@@ -16,6 +20,16 @@ internal static class AirResupplyManager
     private static readonly Dictionary<Aircraft, float> RearmCooldownUntil = new();
     private static readonly Dictionary<Type, bool> ExternalFuelTankTypeCache = new();
     private static float _mapStatusSyncAccumulator = MapStatusSyncInterval;
+    
+    // Diagnostics
+    private static void Diagnostic(string message)
+    {
+        if (DiagnosticLogging)
+            // ReSharper disable once HeuristicUnreachableCode
+#pragma warning disable CS0162 // Unreachable code detected
+            Plugin.Logger.LogInfo($"Air Resupply Diagnostic: {message}");
+#pragma warning restore CS0162 // Unreachable code detected
+    }
     
     // Unit.InitializeUnit()
     internal static void RegisterAircraft(Aircraft aircraft)
@@ -193,6 +207,21 @@ internal static class AirResupplyManager
         var provider = FindBestProvider(receiver, need);
         if (provider is null)
         {
+            // Diagnostics
+            if (session is { Progress: > Epsilon })
+            {
+                var oldProvider = session.Provider;
+                Diagnostic(
+                    $"Service reset mid progress! | " +
+                    $"receiver: {Describe(receiver)} | " +
+                    $"provider: {Describe(oldProvider)} | " +
+                    $"progress: {session.Progress:F1}s | " +
+                    $"distance: {Distance(oldProvider, receiver):F1}m | " +
+                    $"receiverRAlt: {receiver.radarAlt:F1}m | " +
+                    $"providerRAlt: {(oldProvider != null ? oldProvider.radarAlt : -1f):F1}m | " +
+                    $"eligible: {oldProvider != null && IsPairEligibleAndInRange(oldProvider, receiver)}");
+            }
+            
             ReceiverSessions.Remove(receiver);
             return;
         }
@@ -215,6 +244,18 @@ internal static class AirResupplyManager
         
         // Refresh current fuel/ammo levels that might've been expended during service timer
         TryGetServiceNeed(receiver, out var completionNeed);
+        
+        Diagnostic(
+            $"SERVICE COMPLETE | " +
+            $"receiver={Describe(receiver)} | " +
+            $"provider={Describe(provider.Aircraft)} | " +
+            $"progress={session.Progress:F1}s | " +
+            $"distance={Distance(provider.Aircraft, receiver):F1}m | " +
+            $"receiverAlt={receiver.radarAlt:F1}m | " +
+            $"providerAlt={provider.Aircraft.radarAlt:F1}m | " +
+            $"needsAmmo={completionNeed.NeedsAmmo} | " +
+            $"needsFuel={completionNeed.NeedsFuel} | " +
+            $"rearmCooldown={GetRearmCooldownRemaining(receiver):F1}s");
         
         try
         {
@@ -404,6 +445,10 @@ internal static class AirResupplyManager
         var stations = new int[target.weaponStations.Count];
         var transferCost = 0f;
         
+        // Diagnostics
+        var providerAmmoBefore = provider.AmmoRemainingKg;
+        var totalRounds = 0;
+        
         for (var i = 0; i < target.weaponStations.Count; i++)
         {
             var station = target.weaponStations[i];
@@ -414,8 +459,25 @@ internal static class AirResupplyManager
             if (info.cargo || info.massPerRound <= 0f)
                 continue;
             
+            // Diagnostics
+            var ammoField = station.Ammo;
             var ammoTotal = station.GetAmmoTotal();
+            
             var missing = Math.Max(0, station.FullAmmo - ammoTotal);
+            
+            // Diagnostics
+            if (ammoField != ammoTotal)
+                Diagnostic(
+                    $"Ammo Count Mismatch! | " +
+                    $"target: {Describe(target)} | " +
+                    $"index: {i} | " +
+                    $"weapon: {info.shortName ?? info.weaponName ?? "?"} | " +
+                    $"Ammo: {ammoField} | " +
+                    $"GetAmmoTotal: {ammoTotal} | " +
+                    $"FullAmmo: {station.FullAmmo} | " +
+                    $"Weapons: {station.Weapons?.Count ?? -1} | " +
+                    $"correctMissing: {missing}");
+            
             if (missing <= 0)
                 continue;
             
@@ -437,8 +499,27 @@ internal static class AirResupplyManager
                 stations[i] = -1;
             
             var rounds = Math.Min(missing, Math.Min(bySupply, byFunds));
+            
+            // Diagnostics
+            Diagnostic(
+                $"Rearm Station Info | " +
+                $"target: {Describe(target)} | " +
+                $"index: {i} | " +
+                $"weapon: {info.shortName ?? info.weaponName ?? "?"} | " +
+                $"Ammo: {ammoField} | " +
+                $"GetAmmoTotal: {ammoTotal} | " +
+                $"FullAmmo: {station.FullAmmo} | " +
+                $"Weapons: {station.Weapons?.Count ?? -1} | " +
+                $"missing: {missing} | " +
+                $"bySupply: {bySupply} | " +
+                $"byFunds: {byFunds} | " +
+                $"rounds: {rounds}");
+            
             if (rounds <= 0)
                 continue;
+            
+            // Diagnostics
+            totalRounds += rounds;
             
             stations[i] = rounds;
             var transferredMass = rounds * info.massPerRound;
@@ -454,7 +535,12 @@ internal static class AirResupplyManager
         if (successfulRearm)
         {
             if (target.NetworkHQ != null)
+            {
+                var receiverSortieBonus = target.sortieScore *
+                                          MissionManager.CurrentMission.missionSettings.successfulSortieBonus;
                 target.SuccessfulSortie();
+                RewardSupplierSortieShare(provider, target, receiverSortieBonus);
+            }
             
             if (transferCost > 0f)
             {
@@ -465,11 +551,26 @@ internal static class AirResupplyManager
             provider.AmmoRemainingKg = availablePhysicalMass;
         }
         
+        // Diagnostics
+        Diagnostic(
+            $"Rearm Send Info | " +
+            $"target: {Describe(target)} | " +
+            $"provider: {Describe(provider.Aircraft)} | " +
+            $"success: {successfulRearm} | " +
+            $"rounds: {totalRounds} | " +
+            $"cost: {transferCost:F2} | " +
+            $"providerAmmo: {providerAmmoBefore:F2}->{availablePhysicalMass:F2} | " +
+            $"stationCount: {target.weaponStations.Count} | " +
+            $"stations: [{string.Join(",", stations)}]");
+        
         target.RpcRearm(new RearmEventArgs
         {
             Rearmer = provider.Aircraft,
             Stations = stations
         });
+        
+        // Diagnostics
+        Diagnostic($"Rearm RPC Sent! | target: {Describe(target)}");
         
         return successfulRearm;
     }
@@ -477,8 +578,22 @@ internal static class AirResupplyManager
     private static void PerformAirborneService(ProviderState provider, Aircraft target, ServiceNeed need)
     {
         if (need.NeedsAmmo && Plugin.EnableAmmoRearm.Value && provider.AmmoRemainingKg > Epsilon)
+        {
+            // Diagnostics
+            var rearmed = PerformAirborneRearm(provider, target);
+            Diagnostic($"Rearm Result Info | target: {Describe(target)} | successful: {rearmed}");
+            if (rearmed)
+            {
+                StartRearmCooldown(target);
+                Diagnostic($"Rearm Cooldown Started! | target: {Describe(target)} | " +
+                           $"seconds: {Plugin.RearmCooldownSeconds.Value:F1}");
+            }
+            
+            /*
             if (PerformAirborneRearm(provider, target))
                 StartRearmCooldown(target);
+            */
+        }
         
         if (need.NeedsFuel && Plugin.EnableFuelRefuel.Value && provider.GetFuelAvailability().Total > Epsilon)
             PerformAirborneRefuel(provider, target);
@@ -753,7 +868,11 @@ internal static class AirResupplyManager
         if (reward <= Epsilon)
             return;
         
-        hq.RewardPlayer(providerPlayer, target, reward, reward, FactionHQ.RewardType.Supply);
+        var legacy = AirResupplyNetworking.IsPeerProtocolLegacy(providerPlayer.Owner);
+        hq.RewardPlayer(providerPlayer, target, reward, reward,
+            legacy ? FactionHQ.RewardType.Supply : FactionHQ.RewardType.None);
+        if (!legacy)
+            AirResupplyNetworking.TrySendProviderReward(provider.Aircraft, ProviderRewardType.Rearm, reward);
     }
     
     private static void RewardAirborneRefuel(ProviderState provider, Aircraft target, float litresDelivered)
@@ -770,7 +889,11 @@ internal static class AirResupplyManager
         if (reward <= Epsilon)
             return;
         
-        hq.RewardPlayer(providerPlayer, target, reward, reward, FactionHQ.RewardType.Refuel);
+        var legacy = AirResupplyNetworking.IsPeerProtocolLegacy(providerPlayer.Owner);
+        hq.RewardPlayer(providerPlayer, target, reward, reward,
+            legacy ? FactionHQ.RewardType.Refuel : FactionHQ.RewardType.None);
+        if (!legacy)
+            AirResupplyNetworking.TrySendProviderReward(provider.Aircraft, ProviderRewardType.Refuel, reward);
     }
     
     private static int SafeFloorRounds(float available, float perRound)
@@ -946,6 +1069,31 @@ internal static class AirResupplyManager
                 RearmCooldownRemaining = GetRearmCooldownRemaining(aircraft)
             });
         }
+    }
+    
+    private static void RewardSupplierSortieShare(ProviderState provider, Aircraft target, float receiverSortieBonus)
+    {
+        if (provider.Aircraft == null || target == null || receiverSortieBonus <= Epsilon)
+            return;
+        
+        var shareRatio = Plugin.SortieBonusSharePercent.Value * 0.01f;
+        if (shareRatio <= Epsilon)
+            return;
+        
+        var player = provider.Aircraft.Player;
+        var hq = provider.Aircraft.NetworkHQ;
+        if (player == null || hq == null)
+            return;
+        
+        var reward = receiverSortieBonus * shareRatio;
+        if (reward <= Epsilon)
+            return;
+        
+        hq.RewardPlayer(player, target, 0f, reward, FactionHQ.RewardType.None);
+        if (AirResupplyNetworking.IsPeerProtocolLegacy(player.Owner))
+            player.RpcShowSortieBonus(reward);
+        else
+            AirResupplyNetworking.TrySendProviderReward(provider.Aircraft, ProviderRewardType.SortieAssist, reward);
     }
     
     private static string Describe(Aircraft aircraft)

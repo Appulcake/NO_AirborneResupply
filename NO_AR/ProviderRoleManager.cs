@@ -215,7 +215,8 @@ internal static class ProviderRoleManager
             return;
         
         active = active && state.ProviderCapable && aircraft != null && aircraft.Player != null &&
-                 aircraft.NetworkHQ != null && !BoteCompatibility.IsBoteShip(aircraft);
+                 aircraft.NetworkHQ != null && AirResupplyNetworking.IsPeerProtocolSupported(aircraft.Player.Owner) &&
+                 !BoteCompatibility.IsBoteShip(aircraft);
         state.Resolved = true;
         state.Active = active;
         if (aircraft != null)
