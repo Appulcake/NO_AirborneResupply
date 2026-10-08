@@ -59,6 +59,7 @@ Settings configurable by and dictated by host, like general settings:
 - List of valid aircraft (by `jsonKey`) that can be suppliers (yes, you can make a cricket a refueller if you want)
 - Whether being a supplier is enabled by default (this is default checkbox state clients get the first time they select
   a supplier capable plane, and is what server defaults to if it doesn't get info from client for some reason)
+
 Refuel specific settings (dictated by host):
 - Whether airborne refuelling is enabled (on by default)
 - Fuel transfer multiplier (by default 1, allows you to virtually increase/decrease how much fuel there's available, e.g. a
@@ -68,6 +69,7 @@ Refuel specific settings (dictated by host):
   the ground at an ammo source)
 - Supplier internal fuel reserve percent (by default 15%, this is part of the base internal tank not available to hand out,
   so that you can't accidentally give away all your fuel resulting in engine flameout)
+
 Rearm specific settings (dictated by host):
 - Whether airborne rearming ammo is enabled (on by default)
 - Ammo transfer multiplier (by default 1, same as with refueling, allows you to fine tune how much is actually available to
@@ -76,14 +78,17 @@ Rearm specific settings (dictated by host):
   at an ammo source, this withdrawal doesn't consume any ammo from the source at the moment for simplicity)
 - Rearm cooldown (by default 300s so 5 minutes, this is the cooldown someone gets when they rearm, to prevent someone just firing
   and rearming over and over)
+
 Reward specific settings (dictated by host):
 - Refuel reward per 1000L (by default 2 score per 1000L fuel someone gains from being airborne refuelled)
 - Rearm reward multiplier (by default 2, multiplier on vanilla rearm bonus you get as supplier for rearming others)
+
 HUD sections, one section that's server sided:
 - Send HUD updates (on by default, this makes the HUD functionality work for clients, server sends all HUD related updates to
   make sure clients get updated, authoritative information)
 - Display range (by default 5000m, this is how close someone needs to be to a valid supplier for someone to see them pop up on their
   HUD too, the map stats are globally visible but updated at lower interval)
+
 And HUD section that's configurable by clients:
 - HUD enabled (on by default, this is strictly for clients whether they want to opt into having a flight HUD element for viewing info
   related to either being a supplier or going to a supplier and getting serviced)
