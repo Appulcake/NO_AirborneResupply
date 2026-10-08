@@ -383,7 +383,7 @@ internal static class AirResupplyManager
             if (info.cargo || info.nuclear || info.massPerRound <= 0f)
                 continue;
             
-            var missing = Math.Max(0, station.FullAmmo - station.Ammo);
+            var missing = Math.Max(0, station.FullAmmo - station.GetAmmoTotal());
             if (missing > 0)
                 return true;
         }
@@ -414,7 +414,8 @@ internal static class AirResupplyManager
             if (info.cargo || info.massPerRound <= 0f)
                 continue;
             
-            var missing = Math.Max(0, station.FullAmmo - station.Ammo);
+            var ammoTotal = station.GetAmmoTotal();
+            var missing = Math.Max(0, station.FullAmmo - ammoTotal);
             if (missing <= 0)
                 continue;
             
