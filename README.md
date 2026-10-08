@@ -1,7 +1,7 @@
 ## Airborne Resupply
 Adds a simplistic airborne resupply to Nuclear Option, allowing players to opt into being a resupplier role, 
 capable of refuelling and/or rearming players while in the air. Resupply works by being within x distance 
-(by default 1000m) for y seconds (by default 10s) of a supplier while both airborne above a minimum radar 
+(by default 500m) for y seconds (by default 15s) of a supplier while both airborne above a minimum radar 
 altitude (by default 5m), upon which service completes and the logistics pilot is rewarded (for both 
 refuel and rearming).
 
@@ -56,14 +56,15 @@ Once in range, you can see live state of servicing:
 ### Configuration
 By default, rearming has a 5 minute cooldown, refuelling doesn't have any.
 Settings configurable by and dictated by host, like general settings:
-- Resupply range (default 1000m)
-- Resupply time (time you need to spend in range to service, by default 10s)
+- Resupply range (default 500m)
+- Resupply time (time you need to spend in range to service, by default 15s)
 - Check interval (how often server checks for service status, distance checks, pushes HUD updates, by default 1s)
 - Minimum Radar Altitude (minimum RAlt both supplier and recipient has to be to be able to resupply, by default 5m)
 - List of valid aircraft (by `jsonKey`) that can be suppliers (yes, you can make a cricket a refueller if you want), by
   default it's set to MC-260 Chimera, Tarantula, and Ibis
 - Whether being a supplier is enabled by default (this is default checkbox state clients get the first time they select
-  a supplier capable plane, and is what server defaults to if it doesn't get info from client for some reason)
+  a supplier capable plane, and is what server defaults to if it doesn't get info from client when e.g. client doesn't
+  have the mod), this is off as default config (so it's opt-in from clients who have the mod to become a supplier)
 
 Refuel specific settings (dictated by host):
 - Whether airborne refuelling is enabled (on by default)
