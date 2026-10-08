@@ -16,7 +16,7 @@ public class Plugin : BaseUnityPlugin
     internal static ConfigEntry<bool> ProviderEnabledByDefault = null!;
     internal static ConfigEntry<float> ServiceRange = null!;
     internal static ConfigEntry<float> ServiceTime = null!;
-    internal static ConfigEntry<float> CheckInterval = null!;
+    private static ConfigEntry<float> _checkInterval = null!;
     internal static ConfigEntry<float> MinimumRadarAltitude = null!;
     internal static ConfigEntry<bool> EnableAmmoRearm = null!;
     internal static ConfigEntry<float> AmmoTransferMultiplier = null!;
@@ -48,10 +48,10 @@ public class Plugin : BaseUnityPlugin
             "Maximum distance in meters between supplier and receiver.");
         ServiceTime = Config.Bind("1. General (Host authoritative)", "2. Resupply Time", 10f,
             "Seconds the receiver must remain in resupply range.");
-        CheckInterval = Config.Bind("1. General (Host authoritative)", "3. Check Interval", 1f,
+        _checkInterval = Config.Bind("1. General (Host authoritative)", "3. Check Interval", 1f,
             new ConfigDescription("Server sided check interval in seconds.", new AcceptableValueRange<float>(0.1f, 15f)));
         MinimumRadarAltitude = Config.Bind("1. General (Host authoritative)",
-            "4. Minimum Radar Altitude", 30f,
+            "4. Minimum Radar Altitude", 5f,
             "Both supplier and receiver must be at or above this radar altitude.");
         
         ProviderAircraftJsonKeys = Config.Bind("2. Supplier (Host authoritative)",
@@ -130,7 +130,7 @@ public class Plugin : BaseUnityPlugin
             return;
         }
         
-        var serviceInterval = Mathf.Max(0.1f, CheckInterval.Value);
+        var serviceInterval = Mathf.Max(0.1f, _checkInterval.Value);
         _serviceTimeAccumulator += Mathf.Max(0f, Time.deltaTime);
         if (!(_serviceTimeAccumulator >= serviceInterval))
             return;
