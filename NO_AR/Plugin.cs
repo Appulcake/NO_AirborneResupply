@@ -28,6 +28,7 @@ public class Plugin : BaseUnityPlugin
     internal static ConfigEntry<float> ProviderInternalFuelReservePercent = null!;
     internal static ConfigEntry<float> RearmRewardMultiplier = null!;
     internal static ConfigEntry<float> RefuelRewardPer1000Litres = null!;
+    internal static ConfigEntry<float> SortieBonusSharePercent = null!;
     internal static ConfigEntry<bool> EnableHud = null!;
     internal static ConfigEntry<bool> SendHudUpdates = null!;
     internal static ConfigEntry<float> HudDisplayRange = null!;
@@ -44,12 +45,13 @@ public class Plugin : BaseUnityPlugin
         Logger = base.Logger;
         _instance = this;
         
-        ServiceRange = Config.Bind("1. General (Host authoritative)", "1. Resupply Range", 1000f,
+        ServiceRange = Config.Bind("1. General (Host authoritative)", "1. Resupply Range", 500f,
             "Maximum distance in meters between supplier and receiver.");
-        ServiceTime = Config.Bind("1. General (Host authoritative)", "2. Resupply Time", 10f,
+        ServiceTime = Config.Bind("1. General (Host authoritative)", "2. Resupply Time", 15f,
             "Seconds the receiver must remain in resupply range.");
         _checkInterval = Config.Bind("1. General (Host authoritative)", "3. Check Interval", 1f,
-            new ConfigDescription("Server sided check interval in seconds.", new AcceptableValueRange<float>(0.1f, 15f)));
+            new ConfigDescription("Server sided check interval in seconds.",
+                new AcceptableValueRange<float>(0.1f, 15f)));
         MinimumRadarAltitude = Config.Bind("1. General (Host authoritative)",
             "4. Minimum Radar Altitude", 5f,
             "Both supplier and receiver must be at or above this radar altitude.");
@@ -58,7 +60,7 @@ public class Plugin : BaseUnityPlugin
             "1. Aircraft jsonKeys", "QuadVTOL1,UtilityHelo1,Aryx_CargoPlane1",
             "Comma/semicolon/newline separated aircraft definition jsonKeys that may opt into the supplier role.");
         ProviderEnabledByDefault = Config.Bind("2. Supplier (Host authoritative)",
-            "2. Enabled By Default", true,
+            "2. Enabled By Default", false,
             "Default/fallback supplier role for a supplier capable player plane when the server doesn't receive " +
             "a preference. Enabled = opt-out by default, disabled = opt-in by default.");
         
@@ -76,7 +78,7 @@ public class Plugin : BaseUnityPlugin
         ProviderInternalFuelReservePercent = Config.Bind("3. Fuel (Host authoritative)",
             "4. Supplier Internal Fuel Reserve Percent", 15f,
             "Percent of the supplier aircraft's main fuel capacity that can't be handed out to others. " +
-                 "External drop tanks/cargo containers don't count in this, those can be fully transferred.");
+            "External drop tanks/cargo containers don't count in this, those can be fully transferred.");
         
         EnableAmmoRearm = Config.Bind("4. Ammo (Host authoritative)", "1. Enable Ammo Resupply", true,
             "Enable airborne rearming. Uses ammo containers (only the ones able to rearm ground units " +
@@ -85,7 +87,8 @@ public class Plugin : BaseUnityPlugin
         AmmoTransferMultiplier = Config.Bind("4. Ammo (Host authoritative)", "2. Transfer Multiplier", 1f,
             "Ammo transfer multiplier. 1 means one kg of supplier ammo supplies one kg, " +
             "2 means one kg supplies two kg, 0.5 means two supplier kg are consumed per kg supplied.");
-        RefillVirtualAmmoOnGround = Config.Bind("4. Ammo (Host authoritative)", "3. Refill Virtual Ammo On Ground", true,
+        RefillVirtualAmmoOnGround = Config.Bind("4. Ammo (Host authoritative)", "3. Refill Virtual Ammo On Ground",
+            true,
             "Refill virtual tracked ammo cargo while the supplier is stopped on the ground near a rearmer " +
             "(ammo truck/bunker/container etc).");
         RearmCooldownSeconds = Config.Bind("4. Ammo (Host authoritative)", "4. Rearm Cooldown", 300f,
@@ -100,6 +103,14 @@ public class Plugin : BaseUnityPlugin
             "2. Rearm Reward Multiplier", 2f,
             "Multiplier applied to the airborne supplier reward for rearming ammo. " +
             "(0 disables the rearm supplier reward)");
+        SortieBonusSharePercent = Config.Bind("5. Rewards (Host authoritative)",
+            "3. Shared Sortie Bonus Percent", 5f,
+            "When someone rearms at a supplier and gets their sortie bonus, give this % of that bonus " +
+            "to the supplier too. So with this on 5%, if someone rearms and gets a +100 sortie bonus, the supplier " +
+            "also gets a +5 sortie bonus popup. This counts as regular income for the supplier, so once they go back " +
+            "home and land to rearm, their own sortie bonus also increases based on this. So on a mission with 100% " +
+            "sortie bonus, setting this to 5% effectively means they get 5% now and again that 5% once they land. " +
+            "Set to 0 to disable.");
         
         SendHudUpdates = Config.Bind("6. HUD (Host authoritative)", "1. Send HUD Updates", true,
             "When enabled, server sends HUD updates to clients, with this off clients won't have the " +

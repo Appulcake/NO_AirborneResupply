@@ -202,10 +202,7 @@ internal static class ProviderSelectionUi
             return;
         
         Views.Remove(menu);
-        if (existing.ExpandedParent != null)
-        {
-            existing.ExpandedParent.sizeDelta -= new Vector2(0f, ExtraPanelHeight);
-        }
+        if (existing.ExpandedParent != null) existing.ExpandedParent.sizeDelta -= new Vector2(0f, ExtraPanelHeight);
         
         if (existing.Row != null)
             Object.Destroy(existing.Row);
@@ -213,9 +210,9 @@ internal static class ProviderSelectionUi
     
     private sealed class View
     {
+        internal readonly RectTransform? ExpandedParent;
         internal readonly GameObject Row;
         internal readonly Toggle Toggle;
-        internal readonly RectTransform? ExpandedParent;
         internal string JsonKey = string.Empty;
         internal bool SuppressCallback;
         
@@ -236,6 +233,7 @@ internal static class AirResupplySelectionInitializePatch
     // ReSharper disable once InconsistentNaming
     private static void Initialize_Postfix(AircraftSelectionMenu __instance)
     {
+        AirResupplyNetworking.TryShowProtocolWarning();
         ProviderSelectionUi.OnMenuInitialised(__instance, __instance.infoPanel, __instance.flyButton);
     }
     
