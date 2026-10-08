@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Mirage;
 using NuclearOption.Networking;
 using UnityEngine;
@@ -91,10 +92,10 @@ public struct ProviderRoleAssignmentMessage
 internal static class AirResupplyNetworking
 {
     private static bool _customMessagingAvailable = true;
-    private static bool _loggedSendFailure;
     private static NetworkServer? _lifecycleServer;
     private static NetworkClient? _lifecycleClient;
     private static NetworkServer? _registeredServer;
+    private static readonly HashSet<string> LoggedSendFailures = new(StringComparer.Ordinal);
     
     internal static void RegisterClientHandlers(NetworkClient client)
     {
@@ -104,7 +105,7 @@ internal static class AirResupplyNetworking
         {
             _customMessagingAvailable = false;
             Plugin.Logger.LogError("Custom Mirage serializers are unavailable, HUD/map status and partial refuel " +
-                                "networking are disabled.");
+                                   "networking are disabled.");
             return;
         }
         
@@ -138,6 +139,7 @@ internal static class AirResupplyNetworking
                 _lifecycleServer.Started.RemoveListener(OnServerStarted);
                 _lifecycleServer.Stopped.RemoveListener(OnServerStopped);
             }
+            
             _lifecycleServer = server;
             _lifecycleServer.Started.AddListener(OnServerStarted);
             _lifecycleServer.Stopped.AddListener(OnServerStopped);
@@ -172,13 +174,14 @@ internal static class AirResupplyNetworking
     
     private static void RegisterServerHandlers(NetworkServer server)
     {
-        if (server == null || !server.Active || ReferenceEquals(_registeredServer, server) || !MirageSerializerBootstrap.Ready)
+        if (server == null || !server.Active || ReferenceEquals(_registeredServer, server) ||
+            !MirageSerializerBootstrap.Ready)
             return;
         
         if (server.MessageHandler is not IMessageReceiver receiver)
         {
             Plugin.Logger.LogWarning("Server started, but Mirage MessageHandler is not ready. " +
-                                  "Provider role handlers were not registered.");
+                                     "Provider role handlers were not registered.");
             return;
         }
         
@@ -209,7 +212,7 @@ internal static class AirResupplyNetworking
         }
         catch (Exception ex)
         {
-            DisableCustomMessaging(nameof(ProviderPolicyRequestMessage), ex);
+            LogSendFailure(nameof(ProviderPolicyRequestMessage), ex);
         }
     }
     
@@ -234,7 +237,7 @@ internal static class AirResupplyNetworking
         }
         catch (Exception ex)
         {
-            DisableCustomMessaging(nameof(ProviderPreferenceMessage), ex);
+            LogSendFailure(nameof(ProviderPreferenceMessage), ex);
             return false;
         }
     }
@@ -255,7 +258,7 @@ internal static class AirResupplyNetworking
         }
         catch (Exception ex)
         {
-            DisableCustomMessaging(nameof(ProviderRoleAssignmentMessage), ex);
+            LogSendFailure(nameof(ProviderRoleAssignmentMessage), ex);
             return false;
         }
     }
@@ -275,7 +278,7 @@ internal static class AirResupplyNetworking
         }
         catch (Exception ex)
         {
-            DisableCustomMessaging(nameof(ProviderPolicyMessage), ex);
+            LogSendFailure(nameof(ProviderPolicyMessage), ex);
         }
     }
     
@@ -287,7 +290,8 @@ internal static class AirResupplyNetworking
         ProviderRoleManager.ReceivePreference(player, message.AircraftJsonKey ?? string.Empty, message.Enabled);
     }
     
-    internal static bool TrySendFuelTransfer(Aircraft receiver, Aircraft provider, float litres, float targetRatio, bool fullRefill)
+    internal static bool TrySendFuelTransfer(Aircraft receiver, Aircraft provider, float litres, float targetRatio,
+        bool fullRefill)
     {
         if (receiver == null || receiver.Player?.Owner == null || litres <= 0f || !_customMessagingAvailable)
             return false;
@@ -307,7 +311,7 @@ internal static class AirResupplyNetworking
         }
         catch (Exception ex)
         {
-            DisableCustomMessaging(nameof(FuelTransferMessage), ex);
+            LogSendFailure(nameof(FuelTransferMessage), ex);
             return false;
         }
     }
@@ -329,55 +333,48 @@ internal static class AirResupplyNetworking
         }
         catch (Exception ex)
         {
-            DisableCustomMessaging(nameof(ProviderFuelDrainMessage), ex);
+            LogSendFailure(nameof(ProviderFuelDrainMessage), ex);
             return false;
         }
     }
     
-    internal static bool TrySendHudState(INetworkPlayer? player, AirResupplyHudStateMessage state)
+    internal static void TrySendHudState(INetworkPlayer? player, AirResupplyHudStateMessage state)
     {
         if (player == null || !_customMessagingAvailable)
-            return false;
-        
-        try
-        {
-            player.Send(state);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            DisableCustomMessaging(nameof(AirResupplyHudStateMessage), ex);
-            return false;
-        }
-    }
-    
-    internal static bool TrySendMapStatus(INetworkPlayer? player, AirResupplyMapStatusMessage state)
-    {
-        if (player == null || !_customMessagingAvailable)
-            return false;
-        
-        try
-        {
-            player.Send(state);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            DisableCustomMessaging(nameof(AirResupplyMapStatusMessage), ex);
-            return false;
-        }
-    }
-    
-    private static void DisableCustomMessaging(string messageName, Exception ex)
-    {
-        _customMessagingAvailable = false;
-        
-        if (_loggedSendFailure)
             return;
         
-        _loggedSendFailure = true;
-        Plugin.Logger.LogError($"Custom Mirage send failed for {messageName}. " +
-                            "Custom HUD/map/provider role/partial refuel networking is disabled for this process.\n" + ex);
+        try
+        {
+            player.Send(state);
+        }
+        catch (Exception ex)
+        {
+            LogSendFailure(nameof(AirResupplyHudStateMessage), ex);
+        }
+    }
+    
+    internal static void TrySendMapStatus(INetworkPlayer? player, AirResupplyMapStatusMessage state)
+    {
+        if (player == null || !_customMessagingAvailable)
+            return;
+        
+        try
+        {
+            player.Send(state);
+        }
+        catch (Exception ex)
+        {
+            LogSendFailure(nameof(AirResupplyMapStatusMessage), ex);
+        }
+    }
+    
+    private static void LogSendFailure(string messageName, Exception ex)
+    {
+        if (!LoggedSendFailures.Add(messageName))
+            return;
+        
+        Plugin.Logger.LogWarning($"Custom Mirage send failed for {messageName}. " +
+                                 $"This send was skipped, but custom messaging remains enabled.\n{ex}");
     }
     
     private static void OnFuelTransfer(FuelTransferMessage message)
@@ -385,7 +382,8 @@ internal static class AirResupplyNetworking
         if (!GameManager.GetLocalAircraft(out var aircraft) || message.Litres <= 0f)
             return;
         
-        var applied = AirResupplyManager.ApplyFuelToAircraft(aircraft, message.Litres, Mathf.Clamp01(message.TargetRatio));
+        var applied =
+            AirResupplyManager.ApplyFuelToAircraft(aircraft, message.Litres, Mathf.Clamp01(message.TargetRatio));
         if (message.FullRefill)
             AirResupplyManager.SetNeedsFuel(aircraft, false);
         

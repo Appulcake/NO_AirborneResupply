@@ -18,13 +18,14 @@ internal static class HarmonyPatches
     {
         var aircraft = __instance as Aircraft;
         if (aircraft != null && aircraft.IsServer)
-            AirResupplyManager.RegisterProviderAircraft(aircraft);
+            AirResupplyManager.RegisterAircraft(aircraft);
     }
     
     [HarmonyPatch(typeof(MissionManager), nameof(MissionManager.SetMission))]
     [HarmonyPrefix]
     private static void SetMission_Prefix()
     {
+        ProviderClientRoleState.Clear();
         AirResupplyManager.Reset();
         Plugin.ResetUpdateSchedule();
     }

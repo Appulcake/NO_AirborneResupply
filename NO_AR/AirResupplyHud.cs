@@ -23,7 +23,7 @@ internal static class AirResupplyHud
     private static TextMeshProUGUI? _text;
     private static bool _initialised;
     private static bool _hudAllowed;
-    private static float _staleAfter = 3f;
+    private const float HudStateExpirySeconds = 30f;
     
     internal static void Initialise()
     {
@@ -31,13 +31,10 @@ internal static class AirResupplyHud
             return;
         
         _initialised = true;
-        _hudAllowed = Plugin.Enabled.Value && Plugin.EnableHud.Value;
-        UpdateStaleInterval();
-        Plugin.Enabled.SettingChanged += HudVisibilitySettingChanged;
+        _hudAllowed = Plugin.EnableHud.Value;
         Plugin.EnableHud.SettingChanged += HudVisibilitySettingChanged;
         Plugin.HudXOffset.SettingChanged += HudPositionSettingChanged;
         Plugin.HudYOffset.SettingChanged += HudPositionSettingChanged;
-        Plugin.CheckInterval.SettingChanged += HudStaleIntervalSettingChanged;
     }
     
     internal static void OnStateReceived(AirResupplyHudStateMessage state)
@@ -73,7 +70,7 @@ internal static class AirResupplyHud
         }
         
         var now = Time.unscaledTime;
-        if (now - _receivedAt > _staleAfter)
+        if (now - _receivedAt > HudStateExpirySeconds)
         {
             SetHudVisible(false);
             return;
@@ -188,11 +185,9 @@ internal static class AirResupplyHud
     {
         if (_initialised)
         {
-            Plugin.Enabled.SettingChanged -= HudVisibilitySettingChanged;
             Plugin.EnableHud.SettingChanged -= HudVisibilitySettingChanged;
             Plugin.HudXOffset.SettingChanged -= HudPositionSettingChanged;
             Plugin.HudYOffset.SettingChanged -= HudPositionSettingChanged;
-            Plugin.CheckInterval.SettingChanged -= HudStaleIntervalSettingChanged;
             _initialised = false;
         }
         
@@ -341,7 +336,9 @@ internal static class AirResupplyHud
     
     private static bool CanDisplayHudState() =>
         _hudAllowed && !_localAircraftExcluded && _localAircraft != null && _state.Visible;
+    
     private static bool HudNeedsDynamicRefresh(float now) => _state.Servicing || GetRemainingRearmCooldown(now) > 0.5f;
+    
     private static float GetRemainingRearmCooldown(float now) =>
         Mathf.Max(0f, _state.RearmCooldownRemaining - Mathf.Max(0f, now - _receivedAt));
     
@@ -473,12 +470,13 @@ internal static class AirResupplyHud
     
     private static int Percent(float current, float maximum) =>
         maximum <= 0.001f ? 0 : Mathf.RoundToInt(Mathf.Clamp01(current / maximum) * 100f);
+    
     private static string FormatDistance(float metres) =>
         metres >= 1000f ? $"{metres / 1000f:F2} km" : $"{metres:F0} m";
     
     private static void HudVisibilitySettingChanged(object? sender, EventArgs e)
     {
-        _hudAllowed = Plugin.Enabled.Value && Plugin.EnableHud.Value;
+        _hudAllowed = Plugin.EnableHud.Value;
         if (!_hudAllowed)
         {
             SetHudVisible(false);
@@ -491,8 +489,6 @@ internal static class AirResupplyHud
     }
     
     private static void HudPositionSettingChanged(object? sender, EventArgs e) => ApplyPosition();
-    private static void HudStaleIntervalSettingChanged(object? sender, EventArgs e) => UpdateStaleInterval();
-    private static void UpdateStaleInterval() => _staleAfter = Mathf.Max(3f, Plugin.CheckInterval.Value * 3f);
     
     private enum HudColorState
     {

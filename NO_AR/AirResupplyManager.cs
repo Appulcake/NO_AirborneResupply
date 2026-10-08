@@ -1,69 +1,70 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using UnityEngine;
 
 namespace NO_AR;
 
 internal static class AirResupplyManager
 {
+    private const float OverrideRatio = -1f;
     private const float Epsilon = 0.001f;
     private const float MapStatusSyncInterval = 10f;
-    private static readonly HashSet<Aircraft> TrackedProviderAircraft = [];
+    private static readonly HashSet<Aircraft> TrackedAircraft = [];
     private static readonly Dictionary<Aircraft, ProviderState> Providers = new();
     private static readonly Dictionary<Aircraft, ReceiverSession> ReceiverSessions = new();
-    private static readonly List<Aircraft> AircraftScratch = [];
+    private static readonly List<Aircraft> AircraftToRemove = [];
     private static readonly Dictionary<Aircraft, float> RearmCooldownUntil = new();
     private static readonly Dictionary<Type, bool> ExternalFuelTankTypeCache = new();
     private static float _mapStatusSyncAccumulator = MapStatusSyncInterval;
     
     // Unit.InitializeUnit()
-    internal static void RegisterProviderAircraft(Aircraft aircraft)
+    internal static void RegisterAircraft(Aircraft aircraft)
     {
-        if (aircraft == null || !aircraft.IsServer || !TrackedProviderAircraft.Add(aircraft))
+        if (aircraft == null || !aircraft.IsServer || !TrackedAircraft.Add(aircraft))
             return;
         
         aircraft.onDisableUnit += OnAircraftDisabled;
-        ProviderRoleManager.RegisterProviderAircraft(aircraft);
+        ProviderRoleManager.RegisterAircraftRole(aircraft);
     }
     
     private static void OnAircraftDisabled(Unit unit)
     {
-        var aircraft = unit as Aircraft;
-        if (aircraft != null)
-            RemoveTrackedProviderAircraft(aircraft);
+        if (unit is Aircraft aircraft)
+            RemoveTrackedAircraft(aircraft);
     }
     
-    private static void RemoveTrackedProviderAircraft(Aircraft aircraft)
+    private static void RemoveTrackedAircraft(Aircraft aircraft)
     {
         if (aircraft == null)
             return;
         
-        if (TrackedProviderAircraft.Remove(aircraft))
+        if (TrackedAircraft.Remove(aircraft))
             aircraft.onDisableUnit -= OnAircraftDisabled;
         
         Providers.Remove(aircraft);
         ReceiverSessions.Remove(aircraft);
-        ProviderRoleManager.RemoveProviderAircraft(aircraft);
+        ProviderRoleManager.RemoveAircraftRole(aircraft);
         RearmCooldownUntil.Remove(aircraft);
-        AircraftScratch.Clear();
-        foreach (var session in ReceiverSessions.Where(session => session.Value.Provider == aircraft))
-            AircraftScratch.Add(session.Key);
+        AircraftToRemove.Clear();
+        foreach (var session in ReceiverSessions)
+            if (session.Value.Provider == aircraft)
+                AircraftToRemove.Add(session.Key);
         
-        foreach (var aircraftScratch in AircraftScratch)
+        foreach (var aircraftScratch in AircraftToRemove)
             ReceiverSessions.Remove(aircraftScratch);
     }
     
     internal static void Reset()
     {
-        foreach (var aircraft in TrackedProviderAircraft.OfType<Aircraft>())
-            aircraft.onDisableUnit -= OnAircraftDisabled;
+        foreach (var aircraft in TrackedAircraft)
+            if (aircraft != null)
+                aircraft.onDisableUnit -= OnAircraftDisabled;
         
-        TrackedProviderAircraft.Clear();
+        TrackedAircraft.Clear();
         Providers.Clear();
         ReceiverSessions.Clear();
         RearmCooldownUntil.Clear();
-        AircraftScratch.Clear();
+        AircraftToRemove.Clear();
         ProviderRoleManager.ResetServerState();
         _mapStatusSyncAccumulator = MapStatusSyncInterval;
     }
@@ -73,8 +74,11 @@ internal static class AirResupplyManager
         RemoveInvalidAircraft();
         ProviderRoleManager.Update();
         
-        foreach (var aircraft in TrackedProviderAircraft.Where(aircraft => aircraft != null && !aircraft.disabled))
+        foreach (var aircraft in TrackedAircraft)
         {
+            if (aircraft == null || aircraft.disabled)
+                continue;
+            
             ProviderRoleManager.UpdateAircraftRole(aircraft);
             if (IsActiveProvider(aircraft))
             {
@@ -96,7 +100,7 @@ internal static class AirResupplyManager
             SendMapStatusStates();
         }
         
-        foreach (var receiver in TrackedProviderAircraft)
+        foreach (var receiver in TrackedAircraft)
         {
             if (!IsValidReceiver(receiver))
             {
@@ -107,33 +111,35 @@ internal static class AirResupplyManager
             UpdateReceiver(receiver, elapsed);
         }
         
-        if (Plugin.EnableHud.Value)
+        if (Plugin.SendHudUpdates.Value)
             SendHudStates();
     }
     
     private static void RemoveInvalidAircraft()
     {
-        AircraftScratch.Clear();
+        AircraftToRemove.Clear();
         
-        // Unity's null check overload means a destroyed/disabled Aircraft can still be == null while also exist
+        // Unity's null check overload means a destroyed Aircraft can still be == null while also exist
         // in reference collection
-        foreach (var aircraft in TrackedProviderAircraft.Where(aircraft => aircraft == null))
-            AircraftScratch.Add(aircraft!);
+        foreach (var aircraft in TrackedAircraft)
+            if (aircraft == null)
+                AircraftToRemove.Add(aircraft!);
         
-        foreach (var aircraft in AircraftScratch)
+        foreach (var aircraft in AircraftToRemove)
         {
-            TrackedProviderAircraft.Remove(aircraft);
+            TrackedAircraft.Remove(aircraft);
             Providers.Remove(aircraft);
             ReceiverSessions.Remove(aircraft);
             RearmCooldownUntil.Remove(aircraft);
+            ProviderRoleManager.RemoveAircraftRole(aircraft);
         }
         
-        AircraftScratch.Clear();
-        foreach (var session in
-                 ReceiverSessions.Where(session => session.Key == null || session.Value.Provider == null))
-            AircraftScratch.Add(session.Key!);
+        AircraftToRemove.Clear();
+        foreach (var session in ReceiverSessions)
+            if (session.Key == null || session.Value.Provider == null)
+                AircraftToRemove.Add(session.Key!);
         
-        foreach (var aircraft in AircraftScratch)
+        foreach (var aircraft in AircraftToRemove)
             ReceiverSessions.Remove(aircraft);
     }
     
@@ -171,7 +177,7 @@ internal static class AirResupplyManager
     {
         if (ReceiverSessions.TryGetValue(receiver, out var session) && session.Latched)
         {
-            if (GetPairEligibilityFailure(session.Provider, receiver))
+            if (IsPairEligibleAndInRange(session.Provider, receiver))
                 return;
             
             ReceiverSessions.Remove(receiver);
@@ -219,7 +225,7 @@ internal static class AirResupplyManager
             session.Progress = 0f;
             session.Latched = true;
             Plugin.Logger.LogError($"Service completion failed for receiver {Describe(receiver)}, " +
-                                $"provider {Describe(provider.Aircraft)}\n{ex}");
+                                   $"provider {Describe(provider.Aircraft)}\n{ex}");
             return;
         }
         
@@ -237,7 +243,7 @@ internal static class AirResupplyManager
             if (candidate.Aircraft == null)
                 continue;
             
-            if (GetPairEligibilityFailure(candidate.Aircraft, receiver))
+            if (!IsPairEligibleAndInRange(candidate.Aircraft, receiver))
                 continue;
             
             var fuel = candidate.GetFuelAvailability();
@@ -259,20 +265,20 @@ internal static class AirResupplyManager
         return best;
     }
     
-    private static bool GetPairEligibilityFailure(Aircraft provider, Aircraft receiver)
+    private static bool IsPairEligibleAndInRange(Aircraft provider, Aircraft receiver)
     {
         if (provider == null || receiver == null || provider == receiver || provider.disabled || receiver.disabled ||
             !IsActiveProvider(provider) || !IsValidReceiver(receiver) || provider.NetworkHQ == null ||
             receiver.NetworkHQ == null || provider.NetworkHQ != receiver.NetworkHQ)
-            return true;
+            return false;
         
         var minRadarAlt = Mathf.Max(0f, Plugin.MinimumRadarAltitude.Value);
         if (provider.radarAlt < minRadarAlt || receiver.radarAlt < minRadarAlt)
-            return true;
+            return false;
         
         var serviceRange = Mathf.Max(1f, Plugin.ServiceRange.Value);
         var currentDistance = Distance(provider, receiver);
-        return currentDistance > serviceRange;
+        return currentDistance <= serviceRange;
     }
     
     private static float Distance(Aircraft a, Aircraft b)
@@ -331,8 +337,11 @@ internal static class AirResupplyManager
         if (aircraft == null)
             return 0f;
         
-        var overrideRatio = Plugin.FuelTargetOverride.Value;
-        return overrideRatio >= 0f ? Mathf.Clamp01(overrideRatio) : Mathf.Clamp01(aircraft.fuelLevel);
+        // Pls leave me alone this is just for internal testing
+#pragma warning disable CS0162 // Unreachable code detected
+        // ReSharper disable once HeuristicUnreachableCode
+        return OverrideRatio >= 0f ? Mathf.Clamp01(OverrideRatio) : Mathf.Clamp01(aircraft.fuelLevel);
+#pragma warning restore CS0162 // Unreachable code detected
     }
     
     private static float GetFuelMissingToSortieTarget(Aircraft aircraft)
@@ -648,8 +657,16 @@ internal static class AirResupplyManager
     
     private static float SumFuel(List<FuelTank> tanks, bool external)
     {
-        return tanks.Where(tank => tank != null && IsExternalFuelTank(tank) == external)
-            .Sum(tank => Mathf.Max(0f, tank.GetLevel()));
+        var total = 0f;
+        foreach (var tank in tanks)
+        {
+            if (tank == null || IsExternalFuelTank(tank) != external)
+                continue;
+            
+            total += Mathf.Max(0f, tank.GetLevel());
+        }
+        
+        return total;
     }
     
     private static float GetInternalFuelReserveLitres(List<FuelTank> tanks)
@@ -661,8 +678,16 @@ internal static class AirResupplyManager
     
     private static float SumFuelCapacity(List<FuelTank> tanks, bool external)
     {
-        return tanks.Where(tank => tank != null && IsExternalFuelTank(tank) == external)
-            .Sum(tank => Mathf.Max(0f, tank.GetCapacity()));
+        var total = 0f;
+        foreach (var tank in tanks)
+        {
+            if (tank == null || IsExternalFuelTank(tank) != external)
+                continue;
+            
+            total += Mathf.Max(0f, tank.GetCapacity());
+        }
+        
+        return total;
     }
     
     private static bool IsExternalFuelTank(FuelTank tank)
@@ -674,8 +699,15 @@ internal static class AirResupplyManager
         if (ExternalFuelTankTypeCache.TryGetValue(type, out var cached))
             return cached;
         
-        var external = type.GetInterfaces().Any(tankInterface => string.Equals(tankInterface.FullName,
-            "AryxWeaponryExpansion.IExternalFuelTank", StringComparison.Ordinal));
+        var external = false;
+        foreach (var tankInterface in type.GetInterfaces())
+            if (string.Equals(tankInterface.FullName, "AryxWeaponryExpansion.IExternalFuelTank",
+                    StringComparison.Ordinal))
+            {
+                external = true;
+                break;
+            }
+        
         ExternalFuelTankTypeCache[type] = external;
         return external;
     }
@@ -781,7 +813,7 @@ internal static class AirResupplyManager
     
     private static void SendMapStatusStates()
     {
-        foreach (var recipient in TrackedProviderAircraft)
+        foreach (var recipient in TrackedAircraft)
         {
             if (!IsValidParticipant(recipient) || recipient.Player?.Owner == null)
                 continue;
@@ -824,7 +856,7 @@ internal static class AirResupplyManager
     private static void SendHudStates()
     {
         var maxDisplayRange = Mathf.Max(Plugin.ServiceRange.Value, Plugin.HudDisplayRange.Value);
-        foreach (var aircraft in TrackedProviderAircraft)
+        foreach (var aircraft in TrackedAircraft)
         {
             if (!IsValidParticipant(aircraft) || aircraft.Player?.Owner == null)
                 continue;
@@ -1027,12 +1059,15 @@ internal static class AirResupplyManager
         internal readonly float InternalUsable;
         internal readonly float TotalMax;
         
+        // ReSharper disable once ReplaceWithFieldKeyword
+        private readonly float _cargo;
+        
         private float Onboard => External + InternalUsable;
-        internal float Total => field + Onboard;
+        internal float Total => _cargo + Onboard;
         
         internal ProviderFuelAvailability(float cargo, float external, float internalUsable, float totalMax)
         {
-            Total = Mathf.Max(0f, cargo);
+            _cargo = Mathf.Max(0f, cargo);
             External = Mathf.Max(0f, external);
             InternalUsable = Mathf.Max(0f, internalUsable);
             TotalMax = Mathf.Max(0f, totalMax);

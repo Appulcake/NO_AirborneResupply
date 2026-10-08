@@ -12,7 +12,6 @@ namespace NO_AR;
 [BepInDependency("com.minec.bote", BepInDependency.DependencyFlags.SoftDependency)]
 public class Plugin : BaseUnityPlugin
 {
-    internal static ConfigEntry<bool> Enabled = null!;
     internal static ConfigEntry<string> ProviderAircraftJsonKeys = null!;
     internal static ConfigEntry<bool> ProviderEnabledByDefault = null!;
     internal static ConfigEntry<float> ServiceRange = null!;
@@ -27,10 +26,10 @@ public class Plugin : BaseUnityPlugin
     internal static ConfigEntry<bool> RefillVirtualAmmoOnGround = null!;
     internal static ConfigEntry<bool> RefillVirtualFuelOnGround = null!;
     internal static ConfigEntry<float> ProviderInternalFuelReservePercent = null!;
-    internal static ConfigEntry<float> FuelTargetOverride = null!;
     internal static ConfigEntry<float> RearmRewardMultiplier = null!;
     internal static ConfigEntry<float> RefuelRewardPer1000Litres = null!;
     internal static ConfigEntry<bool> EnableHud = null!;
+    internal static ConfigEntry<bool> SendHudUpdates = null!;
     internal static ConfigEntry<float> HudDisplayRange = null!;
     internal static ConfigEntry<float> HudXOffset = null!;
     internal static ConfigEntry<float> HudYOffset = null!;
@@ -45,98 +44,87 @@ public class Plugin : BaseUnityPlugin
         Logger = base.Logger;
         _instance = this;
         
+        ServiceRange = Config.Bind("1. General (Host authoritative)", "1. Resupply Range", 1000f,
+            "Maximum distance in meters between supplier and receiver.");
+        ServiceTime = Config.Bind("1. General (Host authoritative)", "2. Resupply Time", 10f,
+            "Seconds the receiver must remain in resupply range.");
+        CheckInterval = Config.Bind("1. General (Host authoritative)", "3. Check Interval", 1f,
+            new ConfigDescription("Server sided check interval in seconds.", new AcceptableValueRange<float>(0.1f, 15f)));
+        MinimumRadarAltitude = Config.Bind("1. General (Host authoritative)",
+            "4. Minimum Radar Altitude", 30f,
+            "Both supplier and receiver must be at or above this radar altitude.");
         
-        Enabled = Config.Bind("General", "Enabled", true,
-            "Master switch.");
+        ProviderAircraftJsonKeys = Config.Bind("2. Supplier (Host authoritative)",
+            "1. Aircraft jsonKeys", "QuadVTOL1,UtilityHelo1,Aryx_CargoPlane1",
+            "Comma/semicolon/newline separated aircraft definition jsonKeys that may opt into the supplier role.");
+        ProviderEnabledByDefault = Config.Bind("2. Supplier (Host authoritative)",
+            "2. Enabled By Default", true,
+            "Default/fallback supplier role for a supplier capable player plane when the server doesn't receive " +
+            "a preference. Enabled = opt-out by default, disabled = opt-in by default.");
         
-        ProviderAircraftJsonKeys = Config.Bind("Provider", "AircraftJsonKeys", "Aryx_CargoPlane1",
-            "Comma/semicolon/newline-separated aircraft definition jsonKeys that may opt into the provider role. " +
-            "jsonKeys are matched exactly and case-sensitively.");
+        EnableFuelRefuel = Config.Bind("3. Fuel (Host authoritative)", "1. Enable Fuel Resupply", true,
+            "Enable airborne refuelling (uses fuel cargo container > drop tank > main tank fuel).");
+        FuelTransferMultiplier = Config.Bind("3. Fuel (Host authoritative)", "2. Transfer Multiplier", 1f,
+            "Fuel transfer multiplier. 1 means one supplier liter supplies one liter, " +
+            "2 means one liter supplies two liters, 0.5 means two supplier liters are consumed per liter " +
+            "supplied, etc.");
+        RefillVirtualFuelOnGround = Config.Bind("3. Fuel (Host authoritative)",
+            "3. Refill Virtual Fuel On Ground", true,
+            "Also refill virtual tracked fuel type cargo containers while the supplier is stopped on the " +
+            "ground near a rearmer (ammo truck/bunker/container etc, for simplicity both virtual cargo ammo and fuel come  " +
+            "from ammo ground sources).");
+        ProviderInternalFuelReservePercent = Config.Bind("3. Fuel (Host authoritative)",
+            "4. Supplier Internal Fuel Reserve Percent", 15f,
+            "Percent of the supplier aircraft's main fuel capacity that can't be handed out to others. " +
+                 "External drop tanks/cargo containers don't count in this, those can be fully transferred.");
         
-        ProviderEnabledByDefault = Config.Bind("Provider", "EnabledByDefault", true,
-            "Fallback provider role for a provider-capable player aircraft when the server does not receive an " +
-            "explicit per-sortie preference. true = opt-out by default; false = opt-in by default.");
+        EnableAmmoRearm = Config.Bind("4. Ammo (Host authoritative)", "1. Enable Ammo Resupply", true,
+            "Enable airborne rearming. Uses ammo containers (only the ones able to rearm ground units " +
+            "count), their capacity is virtually tracked (they're not actually emptied, if you'd deploy them " +
+            "they'd still be full, this virtual tracking reduces complexity).");
+        AmmoTransferMultiplier = Config.Bind("4. Ammo (Host authoritative)", "2. Transfer Multiplier", 1f,
+            "Ammo transfer multiplier. 1 means one kg of supplier ammo supplies one kg, " +
+            "2 means one kg supplies two kg, 0.5 means two supplier kg are consumed per kg supplied.");
+        RefillVirtualAmmoOnGround = Config.Bind("4. Ammo (Host authoritative)", "3. Refill Virtual Ammo On Ground", true,
+            "Refill virtual tracked ammo cargo while the supplier is stopped on the ground near a rearmer " +
+            "(ammo truck/bunker/container etc).");
+        RearmCooldownSeconds = Config.Bind("4. Ammo (Host authoritative)", "4. Rearm Cooldown", 300f,
+            "Cooldown in seconds after a successful weapon rearm before the same plane can be rearmed " +
+            "again by any supplier aircraft. Refuelling has no cooldown.");
         
-        ServiceRange = Config.Bind("General", "ServiceRange", 1000f,
-            "Maximum distance in metres between provider and receiver.");
+        RefuelRewardPer1000Litres = Config.Bind("5. Rewards (Host authoritative)",
+            "1. Refuel Reward Per 1000Litres", 2f,
+            "Score reward per 1000 litres delivered by airborne refuelling. " +
+            "(0 disables the refuel supplier reward)");
+        RearmRewardMultiplier = Config.Bind("5. Rewards (Host authoritative)",
+            "2. Rearm Reward Multiplier", 2f,
+            "Multiplier applied to the airborne supplier reward for rearming ammo. " +
+            "(0 disables the rearm supplier reward)");
         
-        ServiceTime = Config.Bind("General", "ServiceTime", 3f,
-            "Seconds the receiver must continuously remain in service range.");
+        SendHudUpdates = Config.Bind("6. HUD (Host authoritative)", "1. Send HUD Updates", true,
+            "When enabled, server sends HUD updates to clients, with this off clients won't have the " +
+            "HUD elements of the mod.");
+        HudDisplayRange = Config.Bind("6. HUD (Host authoritative)", "2. Display Range", 5000f,
+            "Distance in meters within which receivers see a nearby supplier on HUD.");
         
-        CheckInterval = Config.Bind("General", "CheckInterval", 1f,
-            "Server-side eligibility/proximity check interval in seconds.");
-        
-        MinimumRadarAltitude = Config.Bind("General", "MinimumRadarAltitude", 30f,
-            "Both provider and receiver must be at least this radar altitude.");
-        
-        EnableAmmoRearm = Config.Bind("Ammo", "EnableAmmoRearm", true,
-            "Enable virtual-cargo airborne rearming.");
-        
-        AmmoTransferMultiplier = Config.Bind("Ammo", "TransferMultiplier", 1f,
-            "Effective airborne ammo transfer multiplier. 1 = one kg of provider ammo supplies one kg; " +
-            "2 = one kg supplies two kg; 0.5 = two kg are consumed per kg supplied. " +
-            "Only the transfer transaction is scaled; physical cargo mass/capacity is unchanged.");
-        
-        RearmCooldownSeconds = Config.Bind("Ammo", "RearmCooldownSeconds", 300f,
-            "Seconds after a successful mid-air weapon rearm before the same aircraft can be " +
-            "rearmed again by any logistics aircraft. Fuel refuelling remains available. " +
-            "A newly spawned/replacement aircraft has its own cooldown state.");
-        
-        EnableFuelRefuel = Config.Bind("Fuel", "EnableFuelRefuel", true,
-            "Enable airborne refuelling from FUEL cargo and transferable provider onboard fuel.");
-        
-        FuelTransferMultiplier = Config.Bind("Fuel", "TransferMultiplier", 1f,
-            "Effective airborne fuel transfer multiplier. 1 = one provider litre supplies one litre; " +
-            "2 = one provider litre supplies two litres; 0.5 = two provider litres are consumed per litre supplied. " +
-            "Only the transfer transaction is scaled; physical fuel mass, endurance and tank capacity are unchanged.");
-        
-        RefillVirtualAmmoOnGround = Config.Bind("Ammo", "RefillVirtualAmmoOnGround", true,
-            "Refill virtual ammo cargo while the provider is stopped beside a valid vanilla Rearmer. " +
-            "The Rearmer's own capacity is not consumed.");
-        
-        RefillVirtualFuelOnGround = Config.Bind("Fuel", "RefillVirtualFuelOnGround", true,
-            "Refill virtual FUEL cargo while the provider is stopped beside a valid vanilla Rearmer. " +
-            "The Rearmer's own capacity is not consumed.");
-        
-        ProviderInternalFuelReservePercent = Config.Bind("Fuel", "ProviderInternalFuelReservePercent", 15f,
-            "Percent of the provider aircraft's internal/main fuel capacity that cannot be donated. " +
-            "External/drop-tank capacity does not increase this reserve and remains fully transferable.");
-        
-        FuelTargetOverride = Config.Bind("Fuel", "FuelTargetOverride", -1f,
-            "Receiver target fuel ratio. -1 uses the aircraft's configured sortie fuel level; " +
-            "0..1 overrides it.");
-        
-        RearmRewardMultiplier = Config.Bind("Rewards", "RearmRewardMultiplier", 2f,
-            "Multiplier applied to the vanilla airborne supplier reward for rearming. " +
-            "The vanilla base reward is sqrt(rearm cost). 0 disables the rearm supplier reward.");
-        
-        RefuelRewardPer1000Litres = Config.Bind("Rewards", "RefuelRewardPer1000Litres", 2f,
-            "Score/allocation reward per 1000 litres actually delivered by airborne refuelling. " +
-            "0 disables the refuel supplier reward.");
-        
-        EnableHud = Config.Bind("HUD", "Enabled", true,
-            "Show projected airborne-resupply status on the flight HUD.");
-        
-        HudDisplayRange = Config.Bind("HUD", "DisplayRange", 5000f,
-            "Maximum distance in metres at which receivers see a nearby tanker.");
-        
-        HudXOffset = Config.Bind("HUD", "XOffset", 320f,
-            "Horizontal offset from the projected flight-HUD centre. Applies immediately.");
-        
-        HudYOffset = Config.Bind("HUD", "YOffset", -180f,
-            "Vertical offset from the projected flight-HUD centre. Applies immediately.");
+        EnableHud = Config.Bind("7. HUD (Client)", "1. HUD Enabled", true,
+            "Show airborne resupply related status on the flight HUD.");
+        HudXOffset = Config.Bind("7. HUD (Client)", "2. Position X Offset", 600f,
+            "Horizontal offset from the flight HUD center.");
+        HudYOffset = Config.Bind("7. HUD (Client)", "3. Position Y Offset", -60f,
+            "Vertical offset from the flight HUD center.");
         
         MirageSerializerBootstrap.Initialise();
         BoteCompatibility.Initialise();
         AirResupplyHud.Initialise();
         Harmony = new Harmony(MyPluginInfo.PLUGIN_GUID);
-        Repatch();
+        Harmony?.PatchAll();
         base.Logger.LogInfo($"Plugin {MyPluginInfo.PLUGIN_GUID} is loaded!");
     }
     
     private void Update()
     {
-        if (!Enabled.Value || NetworkManagerNuclearOption.i == null || !NetworkManagerNuclearOption.i.Server.Active)
+        if (NetworkManagerNuclearOption.i == null || !NetworkManagerNuclearOption.i.Server.Active)
         {
             _serviceTimeAccumulator = 0f;
             return;
@@ -172,14 +160,5 @@ public class Plugin : BaseUnityPlugin
         
         AirResupplyHud.Clear();
         AirResupplyMapStatus.Clear();
-    }
-    
-    private void Repatch()
-    {
-        Harmony?.UnpatchSelf();
-        if (!Enabled.Value)
-            return;
-        
-        Harmony?.PatchAll();
     }
 }

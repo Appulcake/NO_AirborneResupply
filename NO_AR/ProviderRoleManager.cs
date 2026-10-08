@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using NuclearOption.Networking;
 using UnityEngine;
 
@@ -13,11 +12,11 @@ internal static class ProviderRoleManager
     private const float LateCurrentSpawnDiscardSeconds = 5f;
     private static readonly Dictionary<Aircraft, SortieRoleState> Roles = new();
     private static readonly Dictionary<Player, PendingPreference> PendingPreferences = new();
-    private static readonly List<Player> PlayerScratch = [];
+    private static readonly List<Player> PlayersToRemove = [];
     private static string _cachedWhitelistRaw = string.Empty;
     private static HashSet<string> _cachedWhitelist = new(StringComparer.Ordinal);
     
-    internal static void RegisterProviderAircraft(Aircraft aircraft)
+    internal static void RegisterAircraftRole(Aircraft aircraft)
     {
         if (aircraft == null || !aircraft.IsServer || Roles.ContainsKey(aircraft))
             return;
@@ -31,17 +30,19 @@ internal static class ProviderRoleManager
         });
     }
     
-    internal static void RemoveProviderAircraft(Aircraft aircraft)
+    internal static void RemoveAircraftRole(Aircraft aircraft)
     {
-        if (aircraft != null)
-            Roles.Remove(aircraft);
+        if (ReferenceEquals(aircraft, null))
+            return;
+        
+        Roles.Remove(aircraft);
     }
     
     internal static void ResetServerState()
     {
         Roles.Clear();
         PendingPreferences.Clear();
-        PlayerScratch.Clear();
+        PlayersToRemove.Clear();
     }
     
     internal static void Update()
@@ -50,14 +51,15 @@ internal static class ProviderRoleManager
             return;
         
         var now = Time.unscaledTime;
-        PlayerScratch.Clear();
-        foreach (var pair in PendingPreferences
-                     .Where(pair => pair.Key == null || now - pair.Value.ReceivedAt > PendingPreferenceLifetimeSeconds))
-            PlayerScratch.Add(pair.Key);
-        foreach (var player in PlayerScratch)
+        PlayersToRemove.Clear();
+        foreach (var pair in PendingPreferences)
+            if (pair.Key == null || now - pair.Value.ReceivedAt > PendingPreferenceLifetimeSeconds)
+                PlayersToRemove.Add(pair.Key!);
+        
+        foreach (var player in PlayersToRemove)
             PendingPreferences.Remove(player);
         
-        PlayerScratch.Clear();
+        PlayersToRemove.Clear();
     }
     
     internal static void UpdateAircraftRole(Aircraft aircraft)
@@ -67,7 +69,7 @@ internal static class ProviderRoleManager
         
         if (!Roles.TryGetValue(aircraft, out var state))
         {
-            RegisterProviderAircraft(aircraft);
+            RegisterAircraftRole(aircraft);
             if (!Roles.TryGetValue(aircraft, out state))
                 return;
         }

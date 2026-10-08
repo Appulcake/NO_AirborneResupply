@@ -50,8 +50,9 @@ internal static class AirResupplyMapStatus
         
         var friendly = aircraft.NetworkHQ != null &&
                        DynamicMap.GetFactionMode(aircraft.NetworkHQ, true) == FactionMode.Friendly;
-        var visible = mapMaximized && friendly && icon.gameObject.activeInHierarchy && icon.iconImage != null &&
-                      icon.iconImage.enabled;
+        var iconImage = icon.iconImage;
+        var visible = mapMaximized && friendly && icon.gameObject.activeInHierarchy && iconImage != null &&
+                      iconImage.enabled;
         if (!visible)
         {
             HideLabel(icon);
@@ -65,9 +66,7 @@ internal static class AirResupplyMapStatus
         if (!string.Equals(label.text, state.Text, StringComparison.Ordinal))
             label.text = state.Text;
         
-        if (icon.iconImage != null)
-            label.transform.localPosition = icon.iconImage.transform.localPosition + new Vector3(0f, LabelYOffset, 0f);
-        
+        label.transform.localPosition = iconImage!.transform.localPosition + new Vector3(0f, LabelYOffset, 0f);
         label.transform.localScale = Vector3.one * mapInverseScale;
         var theme = ThemeManager.Active;
         label.color = theme != null && theme.ColorTheme != null ? theme.ColorTheme.MapIconFriendly : Color.cyan;
@@ -109,7 +108,8 @@ internal static class AirResupplyMapStatus
         if (icon.iconImage == null || icon.iconImage.transform.parent == null)
             return null;
         
-        var go = new GameObject("NO_AR_MapSupply", typeof(RectTransform), typeof(CanvasRenderer), typeof(TextMeshProUGUI));
+        var go = new GameObject("NO_AR_MapSupply", typeof(RectTransform), typeof(CanvasRenderer),
+            typeof(TextMeshProUGUI));
         go.transform.SetParent(icon.iconImage.transform.parent, false);
         var label = go.GetComponent<TextMeshProUGUI>();
         if (label == null)
@@ -153,7 +153,8 @@ internal static class AirResupplyMapStatus
     
     private static void HideLabel(UnitMapIcon? icon)
     {
-        if (icon != null && Labels.TryGetValue(icon, out var label) && label != null && label.enabled) label.enabled = false;
+        if (icon != null && Labels.TryGetValue(icon, out var label) && label != null && label.enabled)
+            label.enabled = false;
     }
     
     private sealed class MapSupplyState

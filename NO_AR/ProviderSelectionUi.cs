@@ -60,8 +60,13 @@ internal static class ProviderSelectionUi
             vertical.spacing = 4f;
         }
         
+        RectTransform? expandedParent = null;
+        
         if (infoPanel.parent is RectTransform parentRect)
+        {
             parentRect.sizeDelta += new Vector2(0f, ExtraPanelHeight);
+            expandedParent = parentRect;
+        }
         
         var row = new GameObject("NO_AR_AirResupplyPreference", typeof(RectTransform), typeof(LayoutElement),
             typeof(HorizontalLayoutGroup), typeof(Toggle));
@@ -74,7 +79,7 @@ internal static class ProviderSelectionUi
         var horizontal = row.GetComponent<HorizontalLayoutGroup>();
         horizontal.childAlignment = TextAnchor.MiddleCenter;
         horizontal.spacing = 8f;
-        horizontal.childControlWidth = false;
+        horizontal.childControlWidth = true;
         horizontal.childControlHeight = true;
         horizontal.childForceExpandWidth = false;
         horizontal.childForceExpandHeight = false;
@@ -85,6 +90,7 @@ internal static class ProviderSelectionUi
         var boxLayout = box.GetComponent<LayoutElement>();
         boxLayout.minWidth = 22f;
         boxLayout.preferredWidth = 22f;
+        boxLayout.flexibleWidth = 0f;
         boxLayout.minHeight = 22f;
         boxLayout.preferredHeight = 22f;
         var boxImage = box.GetComponent<Image>();
@@ -125,7 +131,7 @@ internal static class ProviderSelectionUi
         toggle.transition = flyButton.transition;
         toggle.colors = flyButton.colors;
         toggle.navigation = new Navigation { mode = Navigation.Mode.None };
-        var view = new View(row, toggle);
+        var view = new View(row, toggle, expandedParent);
         Views[menu] = view;
         toggle.onValueChanged.AddListener(value =>
         {
@@ -181,7 +187,8 @@ internal static class ProviderSelectionUi
             Preferences[key] = enabled;
         }
         
-        AirResupplyNetworking.TrySendProviderPreference(key, enabled);
+        if (!AirResupplyNetworking.TrySendProviderPreference(key, enabled))
+            Plugin.Logger.LogWarning("Could not send provider preference, server default will apply.");
     }
     
     internal static void OnMenuDestroyed(AircraftSelectionMenu menu)
@@ -195,6 +202,11 @@ internal static class ProviderSelectionUi
             return;
         
         Views.Remove(menu);
+        if (existing.ExpandedParent != null)
+        {
+            existing.ExpandedParent.sizeDelta -= new Vector2(0f, ExtraPanelHeight);
+        }
+        
         if (existing.Row != null)
             Object.Destroy(existing.Row);
     }
@@ -203,13 +215,15 @@ internal static class ProviderSelectionUi
     {
         internal readonly GameObject Row;
         internal readonly Toggle Toggle;
+        internal readonly RectTransform? ExpandedParent;
         internal string JsonKey = string.Empty;
         internal bool SuppressCallback;
         
-        internal View(GameObject row, Toggle toggle)
+        internal View(GameObject row, Toggle toggle, RectTransform? expandedParent)
         {
             Row = row;
             Toggle = toggle;
+            ExpandedParent = expandedParent;
         }
     }
 }

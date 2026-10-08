@@ -33,10 +33,10 @@
     </PropertyGroup>
 
     <Target Name="RunMirageCodeGen" AfterTargets="PostBuildEvent">
-        <Exec Command="&quot;$(SolutionDir)Mirage.CodeGen\Mirage.CodeGen.exe&quot; &quot;$(TargetPath)&quot; &quot;$(Game_Path)&quot;" />
-        <Error Condition="$(ExitCode) == 1" />
+        <Exec Command="&quot;$(SolutionDir)Mirage.CodeGen\Mirage.CodeGen.exe&quot; &quot;$(TargetPath)&quot; &quot;$(Game_Path)&quot;"/>
+        <Error Condition="$(ExitCode) == 1"/>
     </Target>
-    
+
     <ItemGroup>
         <PackageReference Include="BepInEx.AssemblyPublicizer.MSBuild" Version="0.4.3" PrivateAssets="all" ExcludeAssets="runtime"/>
         <PackageReference Include="BepInEx.Analyzers" Version="1.*" PrivateAssets="all"/>
@@ -57,12 +57,12 @@
     <ItemGroup Condition="'$(TargetFramework.TrimEnd(`0123456789`))' == 'net'">
         <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.2" PrivateAssets="all"/>
     </ItemGroup>
-    
+
     <Target Name="PostBuild" AfterTargets="Build" Condition="'$(Configuration)' == 'Release' AND '$(ModDestination)' != ''">
         <CreateItem Include="$(OutDir)*.dll">
             <Output TaskParameter="Include" ItemName="DllFiles"/>
         </CreateItem>
-    
+
         <Message Text="Copying build output assemblies from $(OutDir)*.dll to $(ModDestination)\$(AssemblyName)-$(Configuration)" Importance="high"/>
         <Copy SourceFiles="@(DllFiles)" DestinationFolder="$(ModDestination)\$(AssemblyName)"/>
 
