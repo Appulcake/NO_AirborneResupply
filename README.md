@@ -1,4 +1,4 @@
-### Airborne Resupply
+## Airborne Resupply
 Adds a simplistic airborne resupply to Nuclear Option, allowing players to opt into being a resupplier role, 
 capable of refuelling and/or rearming players while in the air. Resupply works by being within x distance 
 (by default 1000m) for y seconds (by default 10s) of a supplier while both airborne above a minimum radar 
@@ -7,12 +7,13 @@ refuel and rearming).
 
 https://github.com/user-attachments/assets/f0816ad4-3795-4eac-8391-a932d1761855
 
-Mod is needed on server and client, but should be safe to have on client when joining servers that don't 
-have it (it'll just not do anything).
+Mod is needed on server and should be ideally present on client. Technically clients without it seem to be able to join fine, but they of course won't get the HUD elements, and also won't get to choose to opt in/out of being a supplier, so if host is set to enable by default, such a client would always act as a supplier on valid planes.
+It should be safe to have it on client when joining servers that don't have it (it'll just not do anything).
 
 Most parts are configurable, with majority of the settings being host/server authoritative, which get synced 
 to clients.
 
+### How to use
 To opt in being a supplier, enable this checkbox before deploying, near the Fly button:<br><br>
 <img width="250" alt="1" src="https://github.com/user-attachments/assets/23b5f5c8-a706-4f6b-9c4e-3a32a0e22595" />
 
@@ -52,6 +53,7 @@ Once in range, you can see live state of servicing:
 
 <img width="615" alt="mpv_38OOse28ei" src="https://github.com/user-attachments/assets/0c2378cf-5eb2-44f7-b635-d6c1525099a3" />
 
+### Configuration
 By default, rearming has a 5 minute cooldown, refuelling doesn't have any.
 Settings configurable by and dictated by host, like general settings:
 - Resupply range (default 1000m)
