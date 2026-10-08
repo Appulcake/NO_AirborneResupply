@@ -56,7 +56,8 @@ Settings configurable by and dictated by host, like general settings:
 - Resupply time (time you need to spend in range to service, by default 10s)
 - Check interval (how often server checks for service status, distance checks, pushes HUD updates, by default 1s)
 - Minimum Radar Altitude (minimum RAlt both supplier and recipient has to be to be able to resupply, by default 5m)
-- List of valid aircraft (by `jsonKey`) that can be suppliers (yes, you can make a cricket a refueller if you want)
+- List of valid aircraft (by `jsonKey`) that can be suppliers (yes, you can make a cricket a refueller if you want), by
+  default it's set to MC-260 Chimera, Tarantula, and Ibis
 - Whether being a supplier is enabled by default (this is default checkbox state clients get the first time they select
   a supplier capable plane, and is what server defaults to if it doesn't get info from client for some reason)
 
