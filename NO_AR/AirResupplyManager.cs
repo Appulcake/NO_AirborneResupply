@@ -20,6 +20,7 @@ internal static class AirResupplyManager
     private static readonly Dictionary<Aircraft, float> RearmCooldownUntil = new();
     private static readonly Dictionary<Type, bool> ExternalFuelTankTypeCache = new();
     private static float _mapStatusSyncAccumulator = MapStatusSyncInterval;
+    private const int MaxProviderHudSessions = 5;
     
     // Diagnostics
     private static void Diagnostic(string message)
@@ -637,7 +638,7 @@ internal static class AirResupplyManager
         provider.FuelCargoRemaining = Mathf.Max(0f, provider.FuelCargoRemaining - cargoUsed);
         remainingDebit -= cargoUsed;
         if (remainingDebit > Epsilon)
-            DrainOnboardFuel(provider.Aircraft, remainingDebit);
+            DrainOnboardFuel(provider.Aircraft, remainingDebit, ProviderRoleManager.GetInternalFuelReserveRatio(provider.Aircraft));
         
         var fullRefill = GetFuelMissingToSortieTarget(target) <= 0.05f;
         // Vanilla refuel RPC can only handle full refills, use custom RPC for partial refills
@@ -712,7 +713,7 @@ internal static class AirResupplyManager
         return applied;
     }
     
-    internal static void DrainOnboardFuel(Aircraft aircraft, float requestedLitres)
+    internal static void DrainOnboardFuel(Aircraft aircraft, float requestedLitres, float reserveRatio)
     {
         if (aircraft == null || requestedLitres <= Epsilon)
             return;
@@ -732,7 +733,7 @@ internal static class AirResupplyManager
             return;
         
         var internalFuel = SumFuel(tanks, false);
-        var reserve = GetInternalFuelReserveLitres(tanks);
+        var reserve = GetInternalFuelReserveLitres(tanks, reserveRatio);
         var internalAvailable = Mathf.Max(0f, internalFuel - reserve);
         if (!(internalAvailable > Epsilon))
             return;
@@ -785,11 +786,10 @@ internal static class AirResupplyManager
         return total;
     }
     
-    private static float GetInternalFuelReserveLitres(List<FuelTank> tanks)
+    private static float GetInternalFuelReserveLitres(List<FuelTank> tanks, float reserveRatio)
     {
         var internalCapacity = SumFuelCapacity(tanks, false);
-        var reserveRatio = Mathf.Clamp(Plugin.ProviderInternalFuelReservePercent.Value, 0f, 100f) * 0.01f;
-        return internalCapacity * reserveRatio;
+        return internalCapacity * Mathf.Clamp01(reserveRatio);
     }
     
     private static float SumFuelCapacity(List<FuelTank> tanks, bool external)
@@ -840,7 +840,7 @@ internal static class AirResupplyManager
         var external = SumFuel(tanks, true);
         var internalFuel = SumFuel(tanks, false);
         var internalCapacity = SumFuelCapacity(tanks, false);
-        var reserveRatio = Mathf.Clamp(Plugin.ProviderInternalFuelReservePercent.Value, 0f, 100f) * 0.01f;
+        var reserveRatio = ProviderRoleManager.GetInternalFuelReserveRatio(aircraft);
         var reserve = internalCapacity * reserveRatio;
         var internalUsable = Mathf.Max(0f, internalFuel - reserve);
         var externalMax = SumFuelCapacity(tanks, true);
@@ -1005,6 +1005,7 @@ internal static class AirResupplyManager
                     RearmCooldownRemaining = 0f
                 });
                 
+                AirResupplyNetworking.TrySendHudExtraV2(aircraft.Player.Owner, BuildProviderHudExtra(aircraft));
                 continue;
             }
             
@@ -1068,6 +1069,11 @@ internal static class AirResupplyManager
                 FuelTotalMaxL = fuelAvailability.TotalMax * fuelTransferMultiplier,
                 RearmCooldownRemaining = GetRearmCooldownRemaining(aircraft)
             });
+            
+            AirResupplyNetworking.TrySendHudExtraV2(aircraft.Player.Owner, new AirResupplyHudExtraMessageV2
+            {
+                ProviderSpeed = Mathf.Max(0f, nearest.Aircraft.speed)
+            });
         }
     }
     
@@ -1094,6 +1100,127 @@ internal static class AirResupplyManager
             player.RpcShowSortieBonus(reward);
         else
             AirResupplyNetworking.TrySendProviderReward(provider.Aircraft, ProviderRewardType.SortieAssist, reward);
+    }
+    
+    internal static void GetProviderPreviewCapacity(Aircraft aircraft, float startingFuelRatio, float internalReserveRatio, out float mainFuelLitres, out float externalFuelLitres, out float fuelCargoLitres, out float ammoKg)
+    {
+        mainFuelLitres = 0f;
+        externalFuelLitres = 0f;
+        fuelCargoLitres = 0f;
+        ammoKg = 0f;
+
+        if (aircraft == null)
+            return;
+
+        var tanks = aircraft.GetFuelTanks();
+        var internalCapacity = SumFuelCapacity(tanks, false);
+        var externalCapacity = SumFuelCapacity(tanks, true);
+        startingFuelRatio = Mathf.Clamp01(startingFuelRatio);
+        internalReserveRatio = Mathf.Clamp01(internalReserveRatio);
+        var startingInternalFuel = internalCapacity * startingFuelRatio;
+        var reservedInternalFuel = internalCapacity * internalReserveRatio;
+        mainFuelLitres = Mathf.Max(0f, startingInternalFuel - reservedInternalFuel);
+        externalFuelLitres = externalCapacity * startingFuelRatio;
+        GetProviderCargoCapacity(aircraft, out ammoKg, out fuelCargoLitres);
+    }
+
+    internal static void GetProviderCargoCapacity(Aircraft aircraft, out float ammoKg, out float fuelCargoLitres)
+    {
+        ammoKg = 0f;
+        fuelCargoLitres = 0f;
+        if (aircraft == null || aircraft.weaponStations == null)
+            return;
+        
+        foreach (var station in aircraft.weaponStations)
+        {
+            if (station?.Weapons == null)
+                continue;
+
+            foreach (var weapon in station.Weapons)
+            {
+                if (weapon is not MountedCargo cargo || cargo.GetAmmoLoaded() <= 0 || weapon.info == null)
+                    continue;
+
+                var amount = Mathf.Max(0f, weapon.info.massPerRound);
+                if (amount <= Epsilon)
+                    continue;
+
+                var isFuelCargo = cargo.cargo != null && string.Equals(cargo.cargo.code, "FUEL", StringComparison.OrdinalIgnoreCase);
+                if (isFuelCargo)
+                {
+                    fuelCargoLitres += amount;
+                }
+                else if (weapon.info.cargo && weapon.info.rearmGround)
+                {
+                    ammoKg += amount;
+                }
+            }
+        }
+    }
+    
+    private static AirResupplyHudExtraMessageV2 BuildProviderHudExtra(Aircraft provider)
+    {
+        var result = new AirResupplyHudExtraMessageV2();
+        if (provider == null)
+            return result;
+        
+        var serviceTime = Mathf.Max(0.1f, Plugin.ServiceTime.Value);
+        var count = 0;
+        
+        foreach (var pair in ReceiverSessions)
+        {
+            if (count >= MaxProviderHudSessions)
+                break;
+            
+            var receiver = pair.Key;
+            var session = pair.Value;
+            if (receiver == null || receiver.disabled || session == null || session.Provider != provider || session.Latched || session.Progress <= Epsilon || !receiver.persistentID.IsValid)
+            {
+                continue;
+            }
+            
+            var percent = (byte)Mathf.Clamp(Mathf.RoundToInt(session.Progress / serviceTime * 100f), 0, 100);
+            
+            SetProviderHudSlot(ref result, count, receiver.persistentID, percent);
+            
+            count++;
+        }
+        
+        result.ServiceCount =
+            (byte)count;
+        
+        return result;
+    }
+    
+    private static void SetProviderHudSlot(ref AirResupplyHudExtraMessageV2 state, int index, PersistentID receiver, byte progress)
+    {
+        switch (index)
+        {
+            case 0:
+                state.Receiver0 = receiver;
+                state.Progress0 = progress;
+                break;
+            
+            case 1:
+                state.Receiver1 = receiver;
+                state.Progress1 = progress;
+                break;
+            
+            case 2:
+                state.Receiver2 = receiver;
+                state.Progress2 = progress;
+                break;
+            
+            case 3:
+                state.Receiver3 = receiver;
+                state.Progress3 = progress;
+                break;
+            
+            case 4:
+                state.Receiver4 = receiver;
+                state.Progress4 = progress;
+                break;
+        }
     }
     
     private static string Describe(Aircraft aircraft)
@@ -1124,38 +1251,13 @@ internal static class AirResupplyManager
         
         internal void RefreshCargoCapacity()
         {
-            if (Aircraft == null || Aircraft.weaponStations == null)
+            if (Aircraft == null)
                 return;
             
-            var newAmmoMax = 0f;
-            var newFuelMax = 0f;
-            
-            foreach (var station in Aircraft.weaponStations)
-            {
-                if (station?.Weapons == null)
-                    continue;
-                
-                foreach (var weapon in station.Weapons)
-                {
-                    var cargo = weapon as MountedCargo;
-                    if (cargo == null || cargo.GetAmmoLoaded() <= 0 || weapon.info == null)
-                        continue;
-                    
-                    var amount = Mathf.Max(0f, weapon.info.massPerRound);
-                    if (amount <= Epsilon)
-                        continue;
-                    
-                    var isFuelCargo = cargo.cargo != null &&
-                                      string.Equals(cargo.cargo.code, "FUEL", StringComparison.OrdinalIgnoreCase);
-                    if (isFuelCargo)
-                        newFuelMax += amount;
-                    else if (weapon.info.cargo && weapon.info.rearmGround) // Exclude naval only resupply containers
-                        newAmmoMax += amount;
-                }
-            }
-            
+            GetProviderCargoCapacity(Aircraft, out var newAmmoMax, out var newFuelMax);
             var oldAmmoMax = AmmoMaxKg;
             var oldFuelMax = FuelCargoMax;
+            
             if (!_initialised)
             {
                 AmmoRemainingKg = newAmmoMax;

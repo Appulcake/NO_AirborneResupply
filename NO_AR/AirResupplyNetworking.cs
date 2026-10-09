@@ -62,6 +62,23 @@ public struct AirResupplyHudStateMessage
 }
 
 [NetworkMessage]
+public struct AirResupplyHudExtraMessageV2
+{
+    public float ProviderSpeed;
+    public byte ServiceCount;
+    public PersistentID Receiver0;
+    public byte Progress0;
+    public PersistentID Receiver1;
+    public byte Progress1;
+    public PersistentID Receiver2;
+    public byte Progress2;
+    public PersistentID Receiver3;
+    public byte Progress3;
+    public PersistentID Receiver4;
+    public byte Progress4;
+}
+
+[NetworkMessage]
 public struct AirResupplyMapStatusMessage
 {
     internal const byte AmmoFlag = 1 << 0;
@@ -96,6 +113,7 @@ public struct ProviderPolicyMessage
     public bool EnabledByDefault;
 }
 
+// Legacy v1
 [NetworkMessage]
 public struct ProviderPreferenceMessage
 {
@@ -103,11 +121,39 @@ public struct ProviderPreferenceMessage
     public bool Enabled;
 }
 
+// Legacy v1
 [NetworkMessage]
 public struct ProviderRoleAssignmentMessage
 {
     public PersistentID AircraftId;
     public bool Enabled;
+}
+
+[NetworkMessage]
+public struct ProviderPreferenceMessageV2
+{
+    [MaxLength(128)] public string AircraftJsonKey;
+    public bool Enabled;
+    public byte InternalFuelReservePercent;
+}
+
+[NetworkMessage]
+public struct ProviderRoleAssignmentMessageV2
+{
+    public PersistentID AircraftId;
+    public bool Enabled;
+    public byte InternalFuelReservePercent;
+}
+
+[NetworkMessage]
+public struct ProviderSettingsMessageV2
+{
+    public byte DefaultInternalFuelReservePercent;
+    public byte MinimumInternalFuelReservePercent;
+    public float FuelTransferMultiplier;
+    public float AmmoTransferMultiplier;
+    public bool FuelEnabled;
+    public bool AmmoEnabled;
 }
 
 internal enum ProviderRewardType : byte
@@ -182,8 +228,11 @@ internal static class AirResupplyNetworking
             client.MessageHandler.RegisterHandler<ProviderFuelDrainMessage>(OnProviderFuelDrain);
             
             client.MessageHandler.RegisterHandler<AirResupplyHudStateMessage>(OnHudState);
+            client.MessageHandler.RegisterHandler<AirResupplyHudExtraMessageV2>(OnHudExtraStateV2);
             client.MessageHandler.RegisterHandler<AirResupplyMapStatusMessage>(OnMapStatus);
             client.MessageHandler.RegisterHandler<ProviderRoleAssignmentMessage>(OnProviderRoleAssignment);
+            client.MessageHandler.RegisterHandler<ProviderRoleAssignmentMessageV2>(OnProviderRoleAssignmentV2);
+            client.MessageHandler.RegisterHandler<ProviderSettingsMessageV2>(OnProviderSettingsReceived);
             
             client.MessageHandler.RegisterHandler<ProviderPolicyMessage>(OnProviderPolicyReceived);
             client.MessageHandler.RegisterHandler<AirResupplyProtocolStatusMessage>(OnProtocolStatus);
@@ -212,8 +261,26 @@ internal static class AirResupplyNetworking
     
     private static void OnProviderRoleAssignment(ProviderRoleAssignmentMessage message)
     {
-        if (ClientSupportsCommonMessages)
+        if (_serverProtocolVersion == LegacyProtocolVersion)
             ProviderClientRoleState.OnAssignment(message);
+    }
+    
+    private static void OnProviderRoleAssignmentV2(ProviderRoleAssignmentMessageV2 message)
+    {
+        if (_clientProtocolCompatible)
+            ProviderClientRoleState.OnAssignment(message);
+    }
+    
+    private static void OnProviderSettingsReceived(ProviderSettingsMessageV2 message)
+    {
+        if (_clientProtocolCompatible)
+            ProviderSelectionUi.OnServerSettingsReceived(message);
+    }
+    
+    private static void OnHudExtraStateV2(AirResupplyHudExtraMessageV2 message)
+    {
+        if (_clientProtocolCompatible)
+            AirResupplyHud.OnExtraStateReceived(message);
     }
     
     internal static void AttachNetworkLifecycle(NetworkServer server, NetworkClient client)
@@ -284,6 +351,7 @@ internal static class AirResupplyNetworking
         {
             receiver.RegisterHandler((MessageDelegateWithPlayer<ProviderPolicyRequestMessage>)OnProviderPolicyRequest);
             receiver.RegisterHandler((MessageDelegateWithPlayer<ProviderPreferenceMessage>)OnProviderPreference);
+            receiver.RegisterHandler((MessageDelegateWithPlayer<ProviderPreferenceMessageV2>)OnProviderPreferenceV2);
             _registeredServer = server;
         }
         catch (Exception ex)
@@ -374,7 +442,7 @@ internal static class AirResupplyNetworking
         _protocolWarningShown = false;
     }
     
-    internal static bool TrySendProviderPreference(string aircraftJsonKey, bool enabled)
+    internal static bool TrySendProviderPreference(string aircraftJsonKey, bool enabled, byte reservePercent)
     {
         if (string.IsNullOrEmpty(aircraftJsonKey) || !_customMessagingAvailable || !ClientSupportsCommonMessages)
             return false;
@@ -386,37 +454,73 @@ internal static class AirResupplyNetworking
         
         try
         {
-            client.Send(new ProviderPreferenceMessage
+            if (_serverProtocolVersion == LegacyProtocolVersion)
             {
-                AircraftJsonKey = aircraftJsonKey,
-                Enabled = enabled
-            });
+                client.Send(new ProviderPreferenceMessage
+                {
+                    AircraftJsonKey = aircraftJsonKey,
+                    Enabled = enabled
+                });
+            }
+            else if (_clientProtocolCompatible)
+            {
+                client.Send(new ProviderPreferenceMessageV2
+                {
+                    AircraftJsonKey = aircraftJsonKey,
+                    Enabled = enabled,
+                    InternalFuelReservePercent = ProviderRoleManager.ClampInternalFuelReservePercent(reservePercent)
+                });
+            }
+            else
+            {
+                return false;
+            }
+            
             return true;
         }
         catch (Exception ex)
         {
-            LogSendFailure(nameof(ProviderPreferenceMessage), ex);
+            LogSendFailure(_serverProtocolVersion == LegacyProtocolVersion
+                    ? nameof(ProviderPreferenceMessage)
+                    : nameof(ProviderPreferenceMessageV2), ex);
             return false;
         }
     }
     
-    internal static bool TrySendProviderRoleAssignment(INetworkPlayer? player, PersistentID aircraftId, bool enabled)
+    internal static bool TrySendProviderRoleAssignment(INetworkPlayer? player, PersistentID aircraftId, bool enabled, byte internalFuelReservePercent)
     {
-        if (player == null || !aircraftId.IsValid || !_customMessagingAvailable || !IsPeerProtocolSupported(player))
+        if (player == null || !aircraftId.IsValid || !_customMessagingAvailable || !TryGetPeerProtocolVersion(player, out var version))
             return false;
         
         try
         {
-            player.Send(new ProviderRoleAssignmentMessage
+            if (version == LegacyProtocolVersion)
             {
-                AircraftId = aircraftId,
-                Enabled = enabled
-            });
+                player.Send(new ProviderRoleAssignmentMessage
+                {
+                    AircraftId = aircraftId,
+                    Enabled = enabled
+                });
+            }
+            else if (version == ProtocolVersion)
+            {
+                player.Send(new ProviderRoleAssignmentMessageV2
+                {
+                    AircraftId = aircraftId,
+                    Enabled = enabled,
+                    InternalFuelReservePercent = ProviderRoleManager.ClampInternalFuelReservePercent(internalFuelReservePercent)
+                });
+            }
+            else
+            {
+                return false;
+            }
+            
             return true;
         }
         catch (Exception ex)
         {
-            LogSendFailure(nameof(ProviderRoleAssignmentMessage), ex);
+            LogSendFailure(version == LegacyProtocolVersion ? nameof(ProviderRoleAssignmentMessage) : nameof(ProviderRoleAssignmentMessageV2), ex);
             return false;
         }
     }
@@ -425,11 +529,10 @@ internal static class AirResupplyNetworking
     {
         if (sender == null || !_customMessagingAvailable)
             return;
-        
+
         PeerProtocolVersions[sender] = message.Version;
         try
         {
-            // Legacy protocol
             if (message.Version == LegacyProtocolVersion)
             {
                 sender.Send(new ProviderPolicyMessage
@@ -439,32 +542,43 @@ internal static class AirResupplyNetworking
                 });
                 return;
             }
-            
-            if (message.Version >= ProtocolVersion)
+
+            if (message.Version != ProtocolVersion)
             {
-                var compatible = message.Version == ProtocolVersion;
-                sender.Send(new AirResupplyProtocolStatusMessage
+                if (message.Version > ProtocolVersion)
                 {
-                    ServerVersion = ProtocolVersion,
-                    Compatible = compatible
-                });
-                if (!compatible)
-                {
-                    Plugin.Logger.LogWarning($"Air Resupply protocol mismatch for {sender}: client version is " +
-                                             $"{message.Version}, server version is {ProtocolVersion}.");
-                    
-                    return;
+                    sender.Send(new AirResupplyProtocolStatusMessage
+                    {
+                        ServerVersion = ProtocolVersion,
+                        Compatible = false
+                    });
+
+                    Plugin.Logger.LogWarning($"Air Resupply protocol mismatch for {sender}: " +
+                                             $"client version is {message.Version}, " +
+                                             $"server version is {ProtocolVersion}.");
                 }
-            }
-            else
-            {
                 return;
             }
-            
+
+            sender.Send(new AirResupplyProtocolStatusMessage
+            {
+                ServerVersion = ProtocolVersion,
+                Compatible = true
+            });
             sender.Send(new ProviderPolicyMessage
             {
                 ProviderAircraftJsonKeys = ProviderRoleManager.GetConfiguredWhitelistRaw(),
                 EnabledByDefault = Plugin.ProviderEnabledByDefault.Value
+            });
+
+            sender.Send(new ProviderSettingsMessageV2
+            {
+                DefaultInternalFuelReservePercent = ProviderRoleManager.GetDefaultInternalFuelReservePercent(),
+                MinimumInternalFuelReservePercent = ProviderRoleManager.MinimumInternalFuelReservePercent,
+                FuelTransferMultiplier = Mathf.Max(0.01f, Plugin.FuelTransferMultiplier.Value),
+                AmmoTransferMultiplier = Mathf.Max(0.01f, Plugin.AmmoTransferMultiplier.Value),
+                FuelEnabled = Plugin.EnableFuelRefuel.Value,
+                AmmoEnabled = Plugin.EnableAmmoRearm.Value
             });
         }
         catch (Exception ex)
@@ -475,11 +589,18 @@ internal static class AirResupplyNetworking
     
     private static void OnProviderPreference(INetworkPlayer? sender, ProviderPreferenceMessage message)
     {
-        if (sender == null || !IsPeerProtocolSupported(sender) || !sender.TryGetPlayer<Player>(out var player) ||
-            player == null)
+        if (sender == null || !IsPeerProtocolLegacy(sender) || !sender.TryGetPlayer<Player>(out var player) || player == null)
             return;
         
-        ProviderRoleManager.ReceivePreference(player, message.AircraftJsonKey ?? string.Empty, message.Enabled);
+        ProviderRoleManager.ReceivePreference(player, message.AircraftJsonKey ?? string.Empty, message.Enabled, ProviderRoleManager.GetDefaultInternalFuelReservePercent());
+    }
+    
+    private static void OnProviderPreferenceV2(INetworkPlayer? sender, ProviderPreferenceMessageV2 message)
+    {
+        if (sender == null || !IsPeerProtocolCurrent(sender) || !sender.TryGetPlayer<Player>(out var player) || player == null)
+            return;
+        
+        ProviderRoleManager.ReceivePreference(player, message.AircraftJsonKey ?? string.Empty, message.Enabled, ProviderRoleManager.ClampInternalFuelReservePercent(message.InternalFuelReservePercent));
     }
     
     internal static bool TrySendFuelTransfer(Aircraft receiver, Aircraft provider, float litres, float targetRatio,
@@ -562,6 +683,21 @@ internal static class AirResupplyNetworking
         }
     }
     
+    internal static void TrySendHudExtraV2(INetworkPlayer? player, AirResupplyHudExtraMessageV2 state)
+    {
+        if (player == null || !_customMessagingAvailable || !IsPeerProtocolCurrent(player))
+            return;
+        
+        try
+        {
+            player.Send(state);
+        }
+        catch (Exception ex)
+        {
+            LogSendFailure(nameof(AirResupplyHudExtraMessageV2), ex);
+        }
+    }
+    
     internal static void TrySendMapStatus(INetworkPlayer? player, AirResupplyMapStatusMessage state)
     {
         if (player == null || !_customMessagingAvailable || !IsPeerProtocolSupported(player))
@@ -608,9 +744,9 @@ internal static class AirResupplyNetworking
         
         var text = (ProviderRewardType)message.Type switch
         {
-            ProviderRewardType.Rearm => $"Airborne Rearm + {message.Amount:F1}",
-            ProviderRewardType.Refuel => $"Airborne Refuel + {message.Amount:F1}",
-            ProviderRewardType.SortieAssist => $"Sortie Assist + {message.Amount:F1}",
+            ProviderRewardType.Rearm => $"Airborne Rearm +{message.Amount:F1}",
+            ProviderRewardType.Refuel => $"Airborne Refuel +{message.Amount:F1}",
+            ProviderRewardType.SortieAssist => $"Sortie Assist +{message.Amount:F1}",
             _ => null
         };
         
@@ -670,7 +806,17 @@ internal static class AirResupplyNetworking
         if (!ClientSupportsCommonMessages || !GameManager.GetLocalAircraft(out var aircraft) || message.Litres <= 0f)
             return;
         
-        AirResupplyManager.DrainOnboardFuel(aircraft, message.Litres);
+        float reserveRatio;
+        if (_serverProtocolVersion == LegacyProtocolVersion)
+        {
+            // Legacy v1 support
+            reserveRatio = Mathf.Clamp(Plugin.ProviderInternalFuelReservePercent.Value, 0f, 100f) * 0.01f;
+        }
+        else
+        {
+            reserveRatio = ProviderClientRoleState.GetInternalFuelReserveRatio(aircraft);
+        }
+        AirResupplyManager.DrainOnboardFuel(aircraft, message.Litres, reserveRatio);
     }
     
     internal static void ReportLocalFuelTransfer(Aircraft provider, float applied) =>

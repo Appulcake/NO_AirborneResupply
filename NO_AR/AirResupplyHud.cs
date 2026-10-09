@@ -1,5 +1,6 @@
 using System;
 using System.Text;
+using NuclearOption.Networking;
 using NuclearOption.UIStyleSystem;
 using TMPro;
 using UnityEngine;
@@ -24,6 +25,9 @@ internal static class AirResupplyHud
     private static TextMeshProUGUI? _text;
     private static bool _initialised;
     private static bool _hudAllowed;
+    private static AirResupplyHudExtraMessageV2 _extraState;
+    private static float _extraReceivedAt = -1000f;
+    private static bool HasFreshExtraState(float now) => now - _extraReceivedAt <= HudStateExpirySeconds;
     
     internal static void Initialise()
     {
@@ -42,6 +46,11 @@ internal static class AirResupplyHud
         _state = state;
         _receivedAt = Time.unscaledTime;
         _nextDynamicRefresh = 0f;
+        if (!state.Visible)
+        {
+            _extraState = default;
+            _extraReceivedAt = -1000f;
+        }
         if (!CanDisplayHudState())
         {
             SetHudVisible(false);
@@ -55,6 +64,8 @@ internal static class AirResupplyHud
     internal static void Clear()
     {
         _state = AirResupplyHudStateMessage.Hidden;
+        _extraState = default;
+        _extraReceivedAt = -1000f;
         _receivedAt = -1000f;
         _nextDynamicRefresh = 0f;
         SetHudVisible(false);
@@ -136,6 +147,8 @@ internal static class AirResupplyHud
         _localAircraftExcluded = false;
         _styleReference = null;
         _state = AirResupplyHudStateMessage.Hidden;
+        _extraState = default;
+        _extraReceivedAt = -1000f;
         _receivedAt = -1000f;
     }
     
@@ -181,6 +194,18 @@ internal static class AirResupplyHud
         ApplyHudColorState(Time.unscaledTime);
     }
     
+    internal static void OnExtraStateReceived(AirResupplyHudExtraMessageV2 state)
+    {
+        _extraState = state;
+        _extraReceivedAt = Time.unscaledTime;
+        _nextDynamicRefresh = 0f;
+        if (CanDisplayHudState())
+        {
+            TryCreateHudText();
+            RefreshText(Time.unscaledTime);
+        }
+    }
+    
     internal static void Shutdown()
     {
         if (_initialised)
@@ -198,6 +223,8 @@ internal static class AirResupplyHud
         _localAircraftExcluded = false;
         _styleReference = null;
         _state = AirResupplyHudStateMessage.Hidden;
+        _extraState = default;
+        _extraReceivedAt = -1000f;
         _receivedAt = -1000f;
     }
     
@@ -379,15 +406,17 @@ internal static class AirResupplyHud
                     break;
             }
             
-            if (!fuelVisible)
-                return sb.ToString();
+            if (fuelVisible)
+            {
+                var breakdown = BuildFuelBreakdown();
+                if (!string.IsNullOrEmpty(breakdown))
+                {
+                    sb.Append('\n');
+                    sb.Append(breakdown);
+                }
+            }
             
-            var breakdown = BuildFuelBreakdown();
-            if (string.IsNullOrEmpty(breakdown))
-                return sb.ToString();
-            
-            sb.Append('\n');
-            sb.Append(breakdown);
+            AppendProviderSessions(sb, now);
             return sb.ToString();
         }
         
@@ -400,6 +429,11 @@ internal static class AirResupplyHud
         receiver.Append(FormatDistance(_state.Distance));
         receiver.Append(" | R: ");
         receiver.Append(FormatDistance(_state.ServiceRange));
+        if (HasFreshExtraState(now))
+        {
+            receiver.Append(" | SPD ");
+            receiver.Append(UnitConverter.SpeedReading(_extraState.ProviderSpeed));
+        }
         var supply = new StringBuilder(48);
         if (fuelVisible)
             supply.Append($"Fuel {fuelPercent}%");
@@ -489,6 +523,81 @@ internal static class AirResupplyHud
     }
     
     private static void HudPositionSettingChanged(object? sender, EventArgs e) => ApplyPosition();
+    
+    private static void AppendProviderSessions(StringBuilder sb, float now)
+    {
+        if (!HasFreshExtraState(now) || _extraState.ServiceCount == 0)
+            return;
+        
+        var count = Mathf.Min(_extraState.ServiceCount, (byte)5);
+        for (var i = 0; i < count; i++)
+        {
+            GetProviderHudSlot(_extraState, i, out var receiverId, out var progress);
+            if (!receiverId.IsValid)
+                continue;
+            
+            var name = ResolveReceiverName(receiverId);
+            if (name.Length > 16)
+                name = name.Substring(0, 16);
+            
+            sb.Append('\n');
+            sb.Append(name);
+            sb.Append(" | ");
+            sb.Append(progress);
+            sb.Append('%');
+        }
+    }
+    
+    private static void GetProviderHudSlot(AirResupplyHudExtraMessageV2 state, int index, out PersistentID receiver,
+        out byte progress)
+    {
+        switch (index)
+        {
+            case 0:
+                receiver = state.Receiver0;
+                progress = state.Progress0;
+                return;
+            case 1:
+                receiver = state.Receiver1;
+                progress = state.Progress1;
+                return;
+            case 2:
+                receiver = state.Receiver2;
+                progress = state.Progress2;
+                return;
+            case 3:
+                receiver = state.Receiver3;
+                progress = state.Progress3;
+                return;
+            case 4:
+                receiver = state.Receiver4;
+                progress = state.Progress4;
+                return;
+            default:
+                receiver = PersistentID.None;
+                progress = 0;
+                return;
+        }
+    }
+    
+    private static string ResolveReceiverName(PersistentID receiverId)
+    {
+        if (receiverId.IsValid && UnitRegistry.TryGetUnit(receiverId, out var unit) && unit is Aircraft aircraft)
+        {
+            var player = aircraft.Player;
+            if (player != null)
+            {
+                var name = player.GetDisplayName(PlayerNameContext.Other);
+                if (!string.IsNullOrWhiteSpace(name))
+                    return name;
+            }
+            
+            if (!string.IsNullOrWhiteSpace(aircraft.unitName))
+                return aircraft.unitName;
+        }
+        
+        return "Receiver";
+    }
     
     private enum HudColorState
     {

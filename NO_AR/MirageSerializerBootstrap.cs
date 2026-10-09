@@ -34,13 +34,17 @@ internal static class MirageSerializerBootstrap
                     RegisterGeneratedMessage<FuelTransferMessageV2>(generatedType) &&
                     RegisterGeneratedMessage<ProviderFuelDrainMessage>(generatedType) &&
                     RegisterGeneratedMessage<AirResupplyHudStateMessage>(generatedType) &&
+                    RegisterGeneratedMessage<AirResupplyHudExtraMessageV2>(generatedType) &&
                     RegisterGeneratedMessage<AirResupplyMapStatusMessage>(generatedType) &&
                     RegisterGeneratedMessage<ProviderPolicyRequestMessage>(generatedType) &&
                     RegisterGeneratedMessage<ProviderPolicyMessage>(generatedType) &&
                     RegisterGeneratedMessage<ProviderPreferenceMessage>(generatedType) &&
                     RegisterGeneratedMessage<ProviderRoleAssignmentMessage>(generatedType) &&
                     RegisterGeneratedMessage<AirResupplyProtocolStatusMessage>(generatedType) &&
-                    RegisterGeneratedMessage<ProviderRewardMessage>(generatedType);
+                    RegisterGeneratedMessage<ProviderRewardMessage>(generatedType) &&
+                    RegisterGeneratedMessage<ProviderPreferenceMessageV2>(generatedType) &&
+                    RegisterGeneratedMessage<ProviderRoleAssignmentMessageV2>(generatedType) &&
+                    RegisterGeneratedMessage<ProviderSettingsMessageV2>(generatedType);
         }
         catch (Exception ex)
         {

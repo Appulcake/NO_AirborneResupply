@@ -120,7 +120,7 @@ public class Plugin : BaseUnityPlugin
         
         EnableHud = Config.Bind("7. HUD (Client)", "1. HUD Enabled", true,
             "Show airborne resupply related status on the flight HUD.");
-        HudXOffset = Config.Bind("7. HUD (Client)", "2. Position X Offset", 600f,
+        HudXOffset = Config.Bind("7. HUD (Client)", "2. Position X Offset", 500f,
             "Horizontal offset from the flight HUD center.");
         HudYOffset = Config.Bind("7. HUD (Client)", "3. Position Y Offset", -60f,
             "Vertical offset from the flight HUD center.");

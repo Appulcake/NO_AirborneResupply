@@ -16,6 +16,25 @@ internal static class ProviderRoleManager
     private static string _cachedWhitelistRaw = string.Empty;
     private static HashSet<string> _cachedWhitelist = new(StringComparer.Ordinal);
     
+    internal const byte MinimumInternalFuelReservePercent = 5;
+    internal static byte GetDefaultInternalFuelReservePercent() => (byte)Mathf.Clamp(Mathf.RoundToInt(Plugin.ProviderInternalFuelReservePercent.Value), MinimumInternalFuelReservePercent, 100);
+    internal static byte ClampInternalFuelReservePercent(int value) => (byte)Mathf.Clamp(value, MinimumInternalFuelReservePercent, 100);
+    
+    internal static byte GetInternalFuelReservePercent(Aircraft aircraft)
+    {
+        if (aircraft != null &&
+            Roles.TryGetValue(aircraft, out var state) &&
+            state.Resolved)
+        {
+            return state.InternalFuelReservePercent;
+        }
+        
+        return GetDefaultInternalFuelReservePercent();
+    }
+    
+    internal static float GetInternalFuelReserveRatio(Aircraft aircraft) =>
+        GetInternalFuelReservePercent(aircraft) * 0.01f;
+    
     internal static void RegisterAircraftRole(Aircraft aircraft)
     {
         if (aircraft == null || !aircraft.IsServer || Roles.ContainsKey(aircraft))
@@ -117,7 +136,7 @@ internal static class ProviderRoleManager
             Time.unscaledTime - pending.ReceivedAt <= PendingPreferenceLifetimeSeconds)
         {
             PendingPreferences.Remove(player);
-            Resolve(aircraft, state, pending.Enabled);
+            Resolve(aircraft, state, pending.Enabled, pending.InternalFuelReservePercent);
             return;
         }
         
@@ -141,34 +160,35 @@ internal static class ProviderRoleManager
         return Roles.TryGetValue(aircraft, out var state) && state.Resolved && !state.Active;
     }
     
-    internal static void ReceivePreference(Player player, string jsonKey, bool enabled)
+    internal static void ReceivePreference(Player player, string jsonKey, bool enabled, byte internalFuelReservePercent)
     {
         if (player == null || string.IsNullOrWhiteSpace(jsonKey) || !IsConfiguredProviderType(jsonKey))
             return;
         
+        internalFuelReservePercent = ClampInternalFuelReservePercent(internalFuelReservePercent);
         var now = Time.unscaledTime;
-        
-        // Handle out of order messages where preference to be a supplier comes after aircraft spawn
+        // Handle out-of-order preference messages arriving after aircraft spawn.
         foreach (var pair in Roles)
         {
             var aircraft = pair.Key;
             var state = pair.Value;
-            if (aircraft == null || aircraft.Player != player ||
-                !string.Equals(state.JsonKey, jsonKey, StringComparison.Ordinal))
+            
+            if (aircraft == null || aircraft.Player != player || !string.Equals(state.JsonKey, jsonKey, StringComparison.Ordinal))
                 continue;
             
             var age = Mathf.Max(0f, now - state.RegisteredAt);
             switch (state.Resolved)
             {
                 case false when age <= PendingPreferenceLifetimeSeconds:
-                    Resolve(aircraft, state, enabled);
+                    Resolve(aircraft, state, enabled, internalFuelReservePercent);
                     return;
+                
                 case true when age <= LateCurrentSpawnDiscardSeconds:
                     return;
             }
         }
         
-        PendingPreferences[player] = new PendingPreference(jsonKey, enabled, now);
+        PendingPreferences[player] = new PendingPreference(jsonKey, enabled, internalFuelReservePercent, now);
     }
     
     private static bool IsConfiguredProviderType(string jsonKey)
@@ -211,12 +231,16 @@ internal static class ProviderRoleManager
     
     private static void Resolve(Aircraft aircraft, SortieRoleState state, bool active)
     {
+        Resolve(aircraft, state, active, GetDefaultInternalFuelReservePercent());
+    }
+    
+    private static void Resolve(Aircraft aircraft, SortieRoleState state, bool active, byte internalFuelReservePercent)
+    {
         if (state.Resolved)
             return;
         
-        active = active && state.ProviderCapable && aircraft != null && aircraft.Player != null &&
-                 aircraft.NetworkHQ != null && AirResupplyNetworking.IsPeerProtocolSupported(aircraft.Player.Owner) &&
-                 !BoteCompatibility.IsBoteShip(aircraft);
+        active = active && state.ProviderCapable && aircraft != null && aircraft.Player != null && aircraft.NetworkHQ != null && AirResupplyNetworking.IsPeerProtocolSupported(aircraft.Player.Owner) && !BoteCompatibility.IsBoteShip(aircraft);
+        state.InternalFuelReservePercent = ClampInternalFuelReservePercent(internalFuelReservePercent);
         state.Resolved = true;
         state.Active = active;
         if (aircraft != null)
@@ -229,8 +253,7 @@ internal static class ProviderRoleManager
             aircraft.Player?.Owner == null || !aircraft.persistentID.IsValid)
             return;
         
-        if (AirResupplyNetworking.TrySendProviderRoleAssignment(aircraft.Player.Owner, aircraft.persistentID,
-                state.Active))
+        if (AirResupplyNetworking.TrySendProviderRoleAssignment(aircraft.Player.Owner, aircraft.persistentID, state.Active, state.InternalFuelReservePercent))
             state.AssignmentSent = true;
     }
     
@@ -242,18 +265,21 @@ internal static class ProviderRoleManager
         internal bool ProviderCapable;
         internal float RegisteredAt;
         internal bool Resolved;
+        internal byte InternalFuelReservePercent;
     }
     
     private readonly struct PendingPreference
     {
         internal readonly string JsonKey;
         internal readonly bool Enabled;
+        internal readonly byte InternalFuelReservePercent;
         internal readonly float ReceivedAt;
         
-        internal PendingPreference(string jsonKey, bool enabled, float receivedAt)
+        internal PendingPreference(string jsonKey, bool enabled, byte internalFuelReservePercent, float receivedAt)
         {
             JsonKey = jsonKey;
             Enabled = enabled;
+            InternalFuelReservePercent = internalFuelReservePercent;
             ReceivedAt = receivedAt;
         }
     }
@@ -262,20 +288,53 @@ internal static class ProviderRoleManager
 internal static class ProviderClientRoleState
 {
     private static readonly HashSet<PersistentID> ActiveProviderAircraft = [];
-    
+    private static readonly Dictionary<PersistentID, byte> InternalFuelReservePercent = new();
+
+    // Legacy v1
     internal static void OnAssignment(ProviderRoleAssignmentMessage message)
     {
         if (!message.AircraftId.IsValid)
             return;
-        
+
+        InternalFuelReservePercent.Remove(message.AircraftId);
         if (message.Enabled)
             ActiveProviderAircraft.Add(message.AircraftId);
         else
             ActiveProviderAircraft.Remove(message.AircraftId);
     }
-    
-    internal static bool IsActiveProvider(Aircraft aircraft) => aircraft != null && aircraft.persistentID.IsValid &&
-                                                                ActiveProviderAircraft.Contains(aircraft.persistentID);
-    
-    internal static void Clear() => ActiveProviderAircraft.Clear();
+
+    // v2
+    internal static void OnAssignment(ProviderRoleAssignmentMessageV2 message)
+    {
+        if (!message.AircraftId.IsValid)
+            return;
+
+        if (message.Enabled)
+        {
+            ActiveProviderAircraft.Add(message.AircraftId);
+            InternalFuelReservePercent[message.AircraftId] = ProviderRoleManager.ClampInternalFuelReservePercent(message.InternalFuelReservePercent);
+        }
+        else
+        {
+            ActiveProviderAircraft.Remove(message.AircraftId);
+            InternalFuelReservePercent.Remove(message.AircraftId);
+        }
+    }
+
+    internal static bool IsActiveProvider(Aircraft aircraft) => aircraft != null && aircraft.persistentID.IsValid && ActiveProviderAircraft.Contains(aircraft.persistentID);
+    internal static float GetInternalFuelReserveRatio(Aircraft aircraft)
+    {
+        if (aircraft != null && aircraft.persistentID.IsValid && InternalFuelReservePercent.TryGetValue(aircraft.persistentID, out var reservePercent))
+        {
+            return reservePercent * 0.01f;
+        }
+
+        return ProviderSelectionUi.GetServerDefaultInternalFuelReservePercent() * 0.01f;
+    }
+
+    internal static void Clear()
+    {
+        ActiveProviderAircraft.Clear();
+        InternalFuelReservePercent.Clear();
+    }
 }
