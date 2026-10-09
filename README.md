@@ -15,7 +15,7 @@ to clients.
 
 ### How to use
 To opt in being a supplier, enable this checkbox before deploying, near the Fly button:<br><br>
-<img width="250" alt="1" src="https://github.com/user-attachments/assets/23b5f5c8-a706-4f6b-9c4e-3a32a0e22595" />
+<img width="300" alt="UI" src="https://github.com/user-attachments/assets/10162380-c014-4509-9179-6aee1cb5a91d" />
 
 And equip yourself with valid resupply sources.
 For refuelling, the priority is fuel cargo containers > Aryx Weaponry Pack external fuel tanks > main fuel.
@@ -45,13 +45,19 @@ remaining to hand give:<br>
 <img width="234" alt="2" src="https://github.com/user-attachments/assets/c88eae2b-2949-4cb0-818b-8429b7ae7f03" />
 
 Anyone not a supplier can resupply at them, when within a certain distance (by default 5km), you see the nearest 
-supplier on your HUD, which also shows how close you are and how close you have to be to get serviced:
+supplier on your HUD, which also shows how close you are and how close you have to be to get serviced, and the speed 
+of the supplier's plane to help match it without targeting them or opening map (not shown here, is present starting 
+v0.34.2.3 of the mod, picture is older):
 
 <img width="1024" alt="3" src="https://github.com/user-attachments/assets/d2cb4900-883c-4fdd-9af1-12af0fe0aa60" />
 
 Once in range, you can see live state of servicing:
 
 <img width="615" alt="mpv_38OOse28ei" src="https://github.com/user-attachments/assets/0c2378cf-5eb2-44f7-b635-d6c1525099a3" />
+
+Suppliers can see up to 5 lines of people servicing at the moment so they're aware:
+
+<img width="552" alt="image" src="https://github.com/user-attachments/assets/4a912031-11cb-4f5c-a3ca-3f3a20dd570d" />
 
 ### Configuration
 By default, rearming has a 5 minute cooldown, refuelling doesn't have any.
@@ -88,6 +94,9 @@ Rearm specific settings (dictated by host):
 Reward specific settings (dictated by host):
 - Refuel reward per 1000L (by default 2 score per 1000L fuel someone gains from being airborne refuelled)
 - Rearm reward multiplier (by default 2, multiplier on vanilla rearm bonus you get as supplier for rearming others)
+- Shared Sortie Bonus Percent (by default 5, setting it to 0 disables it), when someone rearms at a supplier and triggers their
+  sortie bonus, the supplier gets this many % of it as well as assist bonus. This counts as extra income, so when the supplier
+  goes to land and rearms and triggers their sortie bonus, this counts towards that too
 
 HUD sections, one section that's server sided:
 - Send HUD updates (on by default, this makes the HUD functionality work for clients, server sends all HUD related updates to
