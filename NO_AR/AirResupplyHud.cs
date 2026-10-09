@@ -27,6 +27,7 @@ internal static class AirResupplyHud
     private static bool _hudAllowed;
     private static AirResupplyHudExtraMessageV2 _extraState;
     private static float _extraReceivedAt = -1000f;
+    private static float _localRearmCooldownUntil = -1000f;
     private static bool HasFreshExtraState(float now) => now - _extraReceivedAt <= HudStateExpirySeconds;
     
     internal static void Initialise()
@@ -43,14 +44,20 @@ internal static class AirResupplyHud
     
     internal static void OnStateReceived(AirResupplyHudStateMessage state)
     {
+        var now = Time.unscaledTime;
         _state = state;
-        _receivedAt = Time.unscaledTime;
+        _receivedAt = now;
         _nextDynamicRefresh = 0f;
+        if (state is { Visible: true, Mode: AirResupplyHudStateMessage.ReceiverMode })
+            _localRearmCooldownUntil = state.RearmCooldownRemaining > 0.5f
+                ? now + state.RearmCooldownRemaining
+                : -1000f;
         if (!state.Visible)
         {
             _extraState = default;
             _extraReceivedAt = -1000f;
         }
+        
         if (!CanDisplayHudState())
         {
             SetHudVisible(false);
@@ -58,7 +65,7 @@ internal static class AirResupplyHud
         }
         
         TryCreateHudText();
-        RefreshText(Time.unscaledTime);
+        RefreshText(now);
     }
     
     internal static void Clear()
@@ -67,6 +74,7 @@ internal static class AirResupplyHud
         _extraState = default;
         _extraReceivedAt = -1000f;
         _receivedAt = -1000f;
+        _localRearmCooldownUntil = -1000f;
         _nextDynamicRefresh = 0f;
         SetHudVisible(false);
     }
@@ -81,11 +89,6 @@ internal static class AirResupplyHud
         }
         
         var now = Time.unscaledTime;
-        if (now - _receivedAt > HudStateExpirySeconds)
-        {
-            SetHudVisible(false);
-            return;
-        }
         
         SetHudVisible(true);
         if (!HudNeedsDynamicRefresh(now) || now < _nextDynamicRefresh)
@@ -150,6 +153,7 @@ internal static class AirResupplyHud
         _extraState = default;
         _extraReceivedAt = -1000f;
         _receivedAt = -1000f;
+        _localRearmCooldownUntil = -1000f;
     }
     
     // FuelGauge.RefreshSettings()
@@ -226,6 +230,7 @@ internal static class AirResupplyHud
         _extraState = default;
         _extraReceivedAt = -1000f;
         _receivedAt = -1000f;
+        _localRearmCooldownUntil = -1000f;
     }
     
     private static void TryCreateHudText()
@@ -329,6 +334,9 @@ internal static class AirResupplyHud
     
     private static HudColorState GetHudColorState(float now)
     {
+        if (!HasFreshVisibleState(now) && GetRemainingRearmCooldown(now) > 0.5f)
+            return HudColorState.Warning;
+        
         var ammoConfigured = _state.AmmoMaxKg > 0.01f;
         var ammoAvailable = _state.AmmoRemainingKg > 0.01f;
         var fuelConfigured = _state.FuelTotalMaxL > 0.01f;
@@ -361,13 +369,18 @@ internal static class AirResupplyHud
         return HudColorState.AllClear;
     }
     
-    private static bool CanDisplayHudState() =>
-        _hudAllowed && !_localAircraftExcluded && _localAircraft != null && _state.Visible;
+    private static bool CanDisplayHudState()
+    {
+        if (!_hudAllowed || _localAircraftExcluded || _localAircraft == null)
+            return false;
+        
+        var now = Time.unscaledTime;
+        return HasFreshVisibleState(now) || GetRemainingRearmCooldown(now) > 0.5f;
+    }
     
-    private static bool HudNeedsDynamicRefresh(float now) => _state.Servicing || GetRemainingRearmCooldown(now) > 0.5f;
-    
-    private static float GetRemainingRearmCooldown(float now) =>
-        Mathf.Max(0f, _state.RearmCooldownRemaining - Mathf.Max(0f, now - _receivedAt));
+    private static bool HudNeedsDynamicRefresh(float now) => HasFreshVisibleState(now) && _state.Servicing || GetRemainingRearmCooldown(now) > 0.5f;
+    private static float GetRemainingRearmCooldown(float now) => Mathf.Max(0f, _localRearmCooldownUntil - now);
+    private static bool HasFreshVisibleState(float now) => _state.Visible && now - _receivedAt <= HudStateExpirySeconds;
     
     private static void SetHudVisible(bool visible)
     {
@@ -385,6 +398,9 @@ internal static class AirResupplyHud
     
     private static string BuildHudText(float now)
     {
+        if (!HasFreshVisibleState(now))
+            return BuildCooldownOnlyText(now);
+        
         var ammoVisible = _state is { AmmoRemainingKg: > 0.01f, AmmoMaxKg: > 0.01f };
         var ammoPercent = ammoVisible ? Percent(_state.AmmoRemainingKg, _state.AmmoMaxKg) : 0;
         var fuelVisible = _state is { FuelTotalRemainingL: > 0.01f, FuelTotalMaxL: > 0.01f };
@@ -434,6 +450,7 @@ internal static class AirResupplyHud
             receiver.Append(" | SPD ");
             receiver.Append(UnitConverter.SpeedReading(_extraState.ProviderSpeed));
         }
+        
         var supply = new StringBuilder(48);
         if (fuelVisible)
             supply.Append($"Fuel {fuelPercent}%");
@@ -475,6 +492,16 @@ internal static class AirResupplyHud
         }
         
         return receiver.ToString();
+    }
+    
+    private static string BuildCooldownOnlyText(float now)
+    {
+        var remaining = GetRemainingRearmCooldown(now);
+        if (remaining <= 0.5f)
+            return string.Empty;
+        
+        var seconds = Mathf.CeilToInt(remaining);
+        return $"Rearm {seconds / 60}:{seconds % 60:00}";
     }
     
     private static string BuildFuelBreakdown()
@@ -529,7 +556,7 @@ internal static class AirResupplyHud
         if (!HasFreshExtraState(now) || _extraState.ServiceCount == 0)
             return;
         
-        var count = Mathf.Min(_extraState.ServiceCount, (byte)5);
+        var count = Mathf.Min(_extraState.ServiceCount, 5);
         for (var i = 0; i < count; i++)
         {
             GetProviderHudSlot(_extraState, i, out var receiverId, out var progress);

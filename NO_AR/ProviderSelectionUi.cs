@@ -40,7 +40,8 @@ internal static class ProviderSelectionUi
     internal static void OnServerSettingsReceived(ProviderSettingsMessageV2 message)
     {
         _serverMinimumReservePercent = (byte)Mathf.Clamp(message.MinimumInternalFuelReservePercent, 0, 100);
-        _serverDefaultReservePercent = (byte)Mathf.Clamp(message.DefaultInternalFuelReservePercent, _serverMinimumReservePercent, 100);
+        _serverDefaultReservePercent =
+            (byte)Mathf.Clamp(message.DefaultInternalFuelReservePercent, _serverMinimumReservePercent, 100);
         _serverFuelTransferMultiplier = Mathf.Max(0.01f, message.FuelTransferMultiplier);
         _serverAmmoTransferMultiplier = Mathf.Max(0.01f, message.AmmoTransferMultiplier);
         _serverFuelEnabled = message.FuelEnabled;
@@ -89,7 +90,8 @@ internal static class ProviderSelectionUi
         }
     }
     
-    internal static void OnMenuInitialised(AircraftSelectionMenu menu, Transform infoPanel, Button flyButton, Slider fuelLevel)
+    internal static void OnMenuInitialised(AircraftSelectionMenu menu, Transform infoPanel, Button flyButton,
+        Slider fuelLevel)
     {
         // Inspiration from BOTE on adding UI element near this panel
         
@@ -165,7 +167,8 @@ internal static class ProviderSelectionUi
         TextMeshProUGUI? summaryValues = null;
         if (expandedParent != null)
         {
-            summaryPanel = new GameObject("NO_AR_AirResupplyCapacity", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(LayoutElement));
+            summaryPanel = new GameObject("NO_AR_AirResupplyCapacity", typeof(RectTransform), typeof(CanvasRenderer),
+                typeof(Image), typeof(LayoutElement));
             summaryPanel.transform.SetParent(expandedParent, false);
             summaryRect = summaryPanel.GetComponent<RectTransform>();
             summaryRect.anchorMin = new Vector2(0f, 1f);
@@ -190,7 +193,7 @@ internal static class ProviderSelectionUi
                 summaryImage.color = flyImage.color;
                 summaryImage.material = flyImage.material;
             }
-
+            
             summaryImage.preserveAspect = false;
             summaryImage.raycastTarget = false;
             summaryLabels = Object.Instantiate(reserveLabel, summaryPanel.transform);
@@ -304,11 +307,10 @@ internal static class ProviderSelectionUi
         toggle.transition = Selectable.Transition.None;
         toggle.navigation = new Navigation { mode = Navigation.Mode.None };
         
-        UnityAction<float> fuelLevelChanged = _ =>
-        {
-            RefreshCapabilitySummary(menu);
-        };
-        var view = new View(topSpacer, row, toggle, boxImage, checkedBoxColor, uncheckedBoxColor, reserveRow, reserveSlider, reserveValue, reserveCanvasGroup, fuelLevel, fuelLevelChanged, containerRect, expandedParent, containerSpacing, summaryPanel, summaryRect, summaryLabels, summaryMultipliers, summaryValues);
+        UnityAction<float> fuelLevelChanged = _ => { RefreshCapabilitySummary(menu); };
+        var view = new View(topSpacer, row, toggle, boxImage, checkedBoxColor, uncheckedBoxColor, reserveRow,
+            reserveSlider, reserveValue, reserveCanvasGroup, fuelLevel, fuelLevelChanged, containerRect, expandedParent,
+            containerSpacing, summaryPanel, summaryRect, summaryLabels, summaryMultipliers, summaryValues);
         Views[menu] = view;
         
         toggle.onValueChanged.AddListener(value =>
@@ -348,7 +350,7 @@ internal static class ProviderSelectionUi
     {
         if (menu == null || !Views.TryGetValue(menu, out var view))
             return;
-
+        
         var definition = menu.GetSelectedType();
         var key = definition?.jsonKey ?? string.Empty;
         var visible = _hasServerPolicy && key.Length > 0 && _serverProviderKeys.Contains(key);
@@ -361,10 +363,10 @@ internal static class ProviderSelectionUi
             view.JsonKey = string.Empty;
             if (view.SummaryPanel != null)
                 view.SummaryPanel.SetActive(false);
-
+            
             return;
         }
-
+        
         view.JsonKey = key;
         var preference = GetOrCreatePreference(key);
         var reserveSupported = _hasServerSettings;
@@ -380,6 +382,7 @@ internal static class ProviderSelectionUi
             var reserveHeight = view.ReserveRow.GetComponent<RectTransform>().sizeDelta.y;
             requiredHeight += reserveHeight + view.ContainerSpacing;
         }
+        
         SetExpandedHeight(view, requiredHeight);
         view.SuppressCallback = true;
         view.Toggle.SetIsOnWithoutNotify(preference.Enabled);
@@ -393,6 +396,7 @@ internal static class ProviderSelectionUi
             view.ReserveSlider.SetValueWithoutNotify(preference.ReservePercent);
             view.ReserveValue.text = $"{preference.ReservePercent}%";
         }
+        
         view.SuppressCallback = false;
         RefreshCapabilitySummary(menu);
     }
@@ -449,7 +453,8 @@ internal static class ProviderSelectionUi
             return;
         
         if (view.ExpandedParent != null)
-            view.ExpandedParent.sizeDelta = new Vector2(view.ExpandedParent.sizeDelta.x, view.ExpandedParent.sizeDelta.y + delta);
+            view.ExpandedParent.sizeDelta =
+                new Vector2(view.ExpandedParent.sizeDelta.x, view.ExpandedParent.sizeDelta.y + delta);
         
         view.AppliedExtraHeight = requiredHeight;
         Canvas.ForceUpdateCanvases();
@@ -462,27 +467,27 @@ internal static class ProviderSelectionUi
     
     internal static void RefreshCapabilitySummary(AircraftSelectionMenu menu)
     {
-        if (menu == null || !Views.TryGetValue(menu, out var view) || view.SummaryPanel == null || view.SummaryRect == null || view.SummaryLabels == null || view.SummaryMultipliers == null || view.SummaryValues == null)
-        {
-            return;
-        }
-
+        if (menu == null || !Views.TryGetValue(menu, out var view) || view.SummaryPanel == null ||
+            view.SummaryRect == null || view.SummaryLabels == null || view.SummaryMultipliers == null ||
+            view.SummaryValues == null) return;
+        
         if (!_hasServerSettings || string.IsNullOrEmpty(view.JsonKey) || menu.previewAircraft == null)
         {
             view.SummaryPanel.SetActive(false);
             return;
         }
-
+        
         var preference = GetOrCreatePreference(view.JsonKey);
         if (!preference.Enabled)
         {
             view.SummaryPanel.SetActive(false);
             return;
         }
-
+        
         var startingFuelRatio = Mathf.Clamp01(view.FuelLevel.value);
         var reserveRatio = preference.ReservePercent * 0.01f;
-        AirResupplyManager.GetProviderPreviewCapacity(menu.previewAircraft, startingFuelRatio, reserveRatio, out var mainFuel, out var externalFuel, out var fuelCargo, out var ammoKg);
+        AirResupplyManager.GetProviderPreviewCapacity(menu.previewAircraft, startingFuelRatio, reserveRatio,
+            out var mainFuel, out var externalFuel, out var fuelCargo, out var ammoKg);
         if (_serverFuelEnabled)
         {
             mainFuel *= _serverFuelTransferMultiplier;
@@ -495,21 +500,17 @@ internal static class ProviderSelectionUi
             externalFuel = 0f;
             fuelCargo = 0f;
         }
-
+        
         if (_serverAmmoEnabled)
-        {
             ammoKg *= _serverAmmoTransferMultiplier;
-        }
         else
-        {
             ammoKg = 0f;
-        }
-
+        
         var labels = new List<string>
         {
             "<b>AIR RESUPPLY CAPACITY</b>"
         };
-
+        
         var values = new List<string>
         {
             string.Empty
@@ -523,7 +524,8 @@ internal static class ProviderSelectionUi
         if (mainFuel > 0.01f)
         {
             labels.Add("Main Fuel");
-            multipliers.Add(FormatMultiplier(_serverFuelTransferMultiplier)); values.Add($"{mainFuel / 1000f:F1} kL");
+            multipliers.Add(FormatMultiplier(_serverFuelTransferMultiplier));
+            values.Add($"{mainFuel / 1000f:F1} kL");
         }
         
         if (externalFuel > 0.01f)
@@ -553,12 +555,13 @@ internal static class ProviderSelectionUi
             multipliers.Add(string.Empty);
             values.Add(string.Empty);
         }
-
+        
         view.SummaryLabels.text = string.Join("\n", labels);
         view.SummaryMultipliers.text = string.Join("\n", multipliers);
         view.SummaryValues.text = string.Join("\n", values);
         var rowCount = labels.Count - 1;
-        view.SummaryRect.sizeDelta = new Vector2(view.SummaryRect.sizeDelta.x, SummaryBaseHeight + rowCount * SummaryRowHeight);
+        view.SummaryRect.sizeDelta =
+            new Vector2(view.SummaryRect.sizeDelta.x, SummaryBaseHeight + rowCount * SummaryRowHeight);
         view.SummaryPanel.SetActive(true);
     }
     
@@ -568,10 +571,8 @@ internal static class ProviderSelectionUi
             view.ToggleBoxImage.color = enabled ? view.ToggleCheckedColor : view.ToggleUncheckedColor;
     }
     
-    private static string FormatMultiplier(float multiplier)
-    {
-        return Mathf.Abs(multiplier - 1f) <= 0.001f ? string.Empty : $"({multiplier:F1}x)";
-    }
+    private static string FormatMultiplier(float multiplier) =>
+        Mathf.Abs(multiplier - 1f) <= 0.001f ? string.Empty : $"({multiplier:F1}x)";
     
     private static void SetReserveVisible(View view, bool visible)
     {
@@ -593,8 +594,8 @@ internal static class ProviderSelectionUi
     private sealed class ProviderPreference
     {
         internal bool Enabled;
-        internal byte ReservePercent;
         internal bool ReserveExplicitlySet;
+        internal byte ReservePercent;
         
         internal ProviderPreference(bool enabled, byte reservePercent)
         {
@@ -606,31 +607,36 @@ internal static class ProviderSelectionUi
     
     private sealed class View
     {
-        internal readonly GameObject TopSpacer;
         internal readonly RectTransform? ContainerRect;
+        internal readonly float ContainerSpacing;
         internal readonly RectTransform? ExpandedParent;
-        internal readonly GameObject ToggleRow;
-        internal readonly Toggle Toggle;
+        internal readonly Slider FuelLevel;
+        internal readonly UnityAction<float> FuelLevelChanged;
+        internal readonly CanvasGroup ReserveCanvasGroup;
         internal readonly GameObject ReserveRow;
         internal readonly Slider ReserveSlider;
         internal readonly TextMeshProUGUI ReserveValue;
-        internal string JsonKey = string.Empty;
-        internal bool SuppressCallback;
-        internal float AppliedExtraHeight;
-        internal readonly float ContainerSpacing;
-        internal readonly Slider FuelLevel;
+        internal readonly TextMeshProUGUI? SummaryLabels;
+        internal readonly TextMeshProUGUI? SummaryMultipliers;
         internal readonly GameObject? SummaryPanel;
         internal readonly RectTransform? SummaryRect;
-        internal readonly TextMeshProUGUI? SummaryLabels;
         internal readonly TextMeshProUGUI? SummaryValues;
-        internal readonly UnityAction<float> FuelLevelChanged;
-        internal readonly TextMeshProUGUI? SummaryMultipliers;
-        internal readonly CanvasGroup ReserveCanvasGroup;
+        internal readonly Toggle Toggle;
         internal readonly Image ToggleBoxImage;
         internal readonly Color ToggleCheckedColor;
+        internal readonly GameObject ToggleRow;
         internal readonly Color ToggleUncheckedColor;
+        internal readonly GameObject TopSpacer;
+        internal float AppliedExtraHeight;
+        internal string JsonKey = string.Empty;
+        internal bool SuppressCallback;
         
-        internal View(GameObject topSpacer, GameObject toggleRow, Toggle toggle, Image boxImage, Color checkedBoxColor, Color uncheckedBoxColor, GameObject reserveRow, Slider reserveSlider, TextMeshProUGUI reserveValue, CanvasGroup reserveCanvasGroup, Slider fuelLevel, UnityAction<float> fuelLevelChanged, RectTransform? containerRect, RectTransform? expandedParent, float containerSpacing, GameObject? summaryPanel, RectTransform? summaryRect, TextMeshProUGUI? summaryLabels, TextMeshProUGUI? summaryMultipliers, TextMeshProUGUI? summaryValues)
+        internal View(GameObject topSpacer, GameObject toggleRow, Toggle toggle, Image boxImage, Color checkedBoxColor,
+            Color uncheckedBoxColor, GameObject reserveRow, Slider reserveSlider, TextMeshProUGUI reserveValue,
+            CanvasGroup reserveCanvasGroup, Slider fuelLevel, UnityAction<float> fuelLevelChanged,
+            RectTransform? containerRect, RectTransform? expandedParent, float containerSpacing,
+            GameObject? summaryPanel, RectTransform? summaryRect, TextMeshProUGUI? summaryLabels,
+            TextMeshProUGUI? summaryMultipliers, TextMeshProUGUI? summaryValues)
         {
             TopSpacer = topSpacer;
             ToggleRow = toggleRow;
@@ -665,7 +671,8 @@ internal static class AirResupplySelectionInitializePatch
     private static void Initialize_Postfix(AircraftSelectionMenu __instance)
     {
         AirResupplyNetworking.TryShowProtocolWarning();
-        ProviderSelectionUi.OnMenuInitialised(__instance, __instance.infoPanel, __instance.flyButton, __instance.fuelLevel);
+        ProviderSelectionUi.OnMenuInitialised(__instance, __instance.infoPanel, __instance.flyButton,
+            __instance.fuelLevel);
     }
     
     [HarmonyPatch(nameof(AircraftSelectionMenu.SpawnPreview))]

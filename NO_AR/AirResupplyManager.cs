@@ -12,6 +12,7 @@ internal static class AirResupplyManager
     
     // Diagnostics
     private const bool DiagnosticLogging = false;
+    private const int MaxProviderHudSessions = 5;
     
     private static readonly HashSet<Aircraft> TrackedAircraft = [];
     private static readonly Dictionary<Aircraft, ProviderState> Providers = new();
@@ -20,7 +21,6 @@ internal static class AirResupplyManager
     private static readonly Dictionary<Aircraft, float> RearmCooldownUntil = new();
     private static readonly Dictionary<Type, bool> ExternalFuelTankTypeCache = new();
     private static float _mapStatusSyncAccumulator = MapStatusSyncInterval;
-    private const int MaxProviderHudSessions = 5;
     
     // Diagnostics
     private static void Diagnostic(string message)
@@ -638,7 +638,8 @@ internal static class AirResupplyManager
         provider.FuelCargoRemaining = Mathf.Max(0f, provider.FuelCargoRemaining - cargoUsed);
         remainingDebit -= cargoUsed;
         if (remainingDebit > Epsilon)
-            DrainOnboardFuel(provider.Aircraft, remainingDebit, ProviderRoleManager.GetInternalFuelReserveRatio(provider.Aircraft));
+            DrainOnboardFuel(provider.Aircraft, remainingDebit,
+                ProviderRoleManager.GetInternalFuelReserveRatio(provider.Aircraft));
         
         var fullRefill = GetFuelMissingToSortieTarget(target) <= 0.05f;
         // Vanilla refuel RPC can only handle full refills, use custom RPC for partial refills
@@ -1102,16 +1103,18 @@ internal static class AirResupplyManager
             AirResupplyNetworking.TrySendProviderReward(provider.Aircraft, ProviderRewardType.SortieAssist, reward);
     }
     
-    internal static void GetProviderPreviewCapacity(Aircraft aircraft, float startingFuelRatio, float internalReserveRatio, out float mainFuelLitres, out float externalFuelLitres, out float fuelCargoLitres, out float ammoKg)
+    internal static void GetProviderPreviewCapacity(Aircraft aircraft, float startingFuelRatio,
+        float internalReserveRatio, out float mainFuelLitres, out float externalFuelLitres, out float fuelCargoLitres,
+        out float ammoKg)
     {
         mainFuelLitres = 0f;
         externalFuelLitres = 0f;
         fuelCargoLitres = 0f;
         ammoKg = 0f;
-
+        
         if (aircraft == null)
             return;
-
+        
         var tanks = aircraft.GetFuelTanks();
         var internalCapacity = SumFuelCapacity(tanks, false);
         var externalCapacity = SumFuelCapacity(tanks, true);
@@ -1123,7 +1126,7 @@ internal static class AirResupplyManager
         externalFuelLitres = externalCapacity * startingFuelRatio;
         GetProviderCargoCapacity(aircraft, out ammoKg, out fuelCargoLitres);
     }
-
+    
     internal static void GetProviderCargoCapacity(Aircraft aircraft, out float ammoKg, out float fuelCargoLitres)
     {
         ammoKg = 0f;
@@ -1135,25 +1138,21 @@ internal static class AirResupplyManager
         {
             if (station?.Weapons == null)
                 continue;
-
+            
             foreach (var weapon in station.Weapons)
             {
                 if (weapon is not MountedCargo cargo || cargo.GetAmmoLoaded() <= 0 || weapon.info == null)
                     continue;
-
+                
                 var amount = Mathf.Max(0f, weapon.info.massPerRound);
                 if (amount <= Epsilon)
                     continue;
-
-                var isFuelCargo = cargo.cargo != null && string.Equals(cargo.cargo.code, "FUEL", StringComparison.OrdinalIgnoreCase);
+                
+                var isFuelCargo = cargo.cargo != null &&
+                                  string.Equals(cargo.cargo.code, "FUEL", StringComparison.OrdinalIgnoreCase);
                 if (isFuelCargo)
-                {
                     fuelCargoLitres += amount;
-                }
-                else if (weapon.info.cargo && weapon.info.rearmGround)
-                {
-                    ammoKg += amount;
-                }
+                else if (weapon.info.cargo && weapon.info.rearmGround) ammoKg += amount;
             }
         }
     }
@@ -1174,10 +1173,8 @@ internal static class AirResupplyManager
             
             var receiver = pair.Key;
             var session = pair.Value;
-            if (receiver == null || receiver.disabled || session == null || session.Provider != provider || session.Latched || session.Progress <= Epsilon || !receiver.persistentID.IsValid)
-            {
-                continue;
-            }
+            if (receiver == null || receiver.disabled || session == null || session.Provider != provider ||
+                session.Latched || session.Progress <= Epsilon || !receiver.persistentID.IsValid) continue;
             
             var percent = (byte)Mathf.Clamp(Mathf.RoundToInt(session.Progress / serviceTime * 100f), 0, 100);
             
@@ -1192,7 +1189,8 @@ internal static class AirResupplyManager
         return result;
     }
     
-    private static void SetProviderHudSlot(ref AirResupplyHudExtraMessageV2 state, int index, PersistentID receiver, byte progress)
+    private static void SetProviderHudSlot(ref AirResupplyHudExtraMessageV2 state, int index, PersistentID receiver,
+        byte progress)
     {
         switch (index)
         {
