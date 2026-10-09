@@ -938,33 +938,37 @@ internal static class AirResupplyManager
     
     private static void SendMapStatusStates()
     {
-        foreach (var recipient in TrackedAircraft)
+        foreach (var provider in Providers.Values)
         {
-            if (!IsValidParticipant(recipient) || recipient.Player?.Owner == null)
+            var providerAircraft = provider.Aircraft;
+            if (providerAircraft == null || providerAircraft.disabled || !providerAircraft.persistentID.IsValid ||
+                providerAircraft.NetworkHQ == null)
                 continue;
             
-            foreach (var provider in Providers.Values)
+            var fuel = provider.GetFuelAvailability();
+            var ammoPercent = QuantiseMapPercent(provider.AmmoRemainingKg, provider.AmmoMaxKg);
+            var fuelPercent = QuantiseMapPercent(fuel.Total, fuel.TotalMax);
+            byte flags = 0;
+            if (ammoPercent > 0)
+                flags |= AirResupplyMapStatusMessage.AmmoFlag;
+            
+            if (fuelPercent > 0)
+                flags |= AirResupplyMapStatusMessage.FuelFlag;
+            
+            var message = new AirResupplyMapStatusMessage
             {
-                var providerAircraft = provider.Aircraft;
-                if (providerAircraft == null || providerAircraft.disabled || !providerAircraft.persistentID.IsValid ||
-                    providerAircraft.NetworkHQ == null || providerAircraft.NetworkHQ != recipient.NetworkHQ)
+                ProviderId = providerAircraft.persistentID,
+                Flags = flags,
+                AmmoPercent = ammoPercent,
+                FuelPercent = fuelPercent
+            };
+            
+            foreach (var player in providerAircraft.NetworkHQ.GetPlayers(false))
+            {
+                if (player == null || player.Owner == null)
                     continue;
                 
-                var fuel = provider.GetFuelAvailability();
-                var ammoPercent = QuantiseMapPercent(provider.AmmoRemainingKg, provider.AmmoMaxKg);
-                var fuelPercent = QuantiseMapPercent(fuel.Total, fuel.TotalMax);
-                byte flags = 0;
-                if (ammoPercent > 0)
-                    flags |= AirResupplyMapStatusMessage.AmmoFlag;
-                if (fuelPercent > 0)
-                    flags |= AirResupplyMapStatusMessage.FuelFlag;
-                AirResupplyNetworking.TrySendMapStatus(recipient.Player.Owner, new AirResupplyMapStatusMessage
-                {
-                    ProviderId = providerAircraft.persistentID,
-                    Flags = flags,
-                    AmmoPercent = ammoPercent,
-                    FuelPercent = fuelPercent
-                });
+                AirResupplyNetworking.TrySendMapStatus(player.Owner, message);
             }
         }
     }

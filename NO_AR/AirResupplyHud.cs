@@ -378,7 +378,9 @@ internal static class AirResupplyHud
         return HasFreshVisibleState(now) || GetRemainingRearmCooldown(now) > 0.5f;
     }
     
-    private static bool HudNeedsDynamicRefresh(float now) => HasFreshVisibleState(now) && _state.Servicing || GetRemainingRearmCooldown(now) > 0.5f;
+    private static bool HudNeedsDynamicRefresh(float now) =>
+        (HasFreshVisibleState(now) && _state.Servicing) || GetRemainingRearmCooldown(now) > 0.5f;
+    
     private static float GetRemainingRearmCooldown(float now) => Mathf.Max(0f, _localRearmCooldownUntil - now);
     private static bool HasFreshVisibleState(float now) => _state.Visible && now - _receivedAt <= HudStateExpirySeconds;
     
