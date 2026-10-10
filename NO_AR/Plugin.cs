@@ -15,6 +15,7 @@ public class Plugin : BaseUnityPlugin
     internal static ConfigEntry<string> ProviderAircraftJsonKeys = null!;
     internal static ConfigEntry<bool> ProviderEnabledByDefault = null!;
     internal static ConfigEntry<float> ServiceRange = null!;
+    internal static ConfigEntry<float> HeliServiceRange = null!;
     internal static ConfigEntry<float> ServiceTime = null!;
     private static ConfigEntry<float> _checkInterval = null!;
     internal static ConfigEntry<float> MinimumRadarAltitude = null!;
@@ -47,6 +48,9 @@ public class Plugin : BaseUnityPlugin
         
         ServiceRange = Config.Bind("1. General (Host authoritative)", "1. Resupply Range", 500f,
             "Maximum distance in meters between supplier and receiver.");
+        HeliServiceRange = Config.Bind("1. General (Host authoritative)",
+            "1a. Heli Resupply Range", ServiceRange.Value * 0.5f,
+            "Maximum distance in meters between a helicopter supplier and receiver.");
         ServiceTime = Config.Bind("1. General (Host authoritative)", "2. Resupply Time", 15f,
             "Seconds the receiver must remain in resupply range.");
         _checkInterval = Config.Bind("1. General (Host authoritative)", "3. Check Interval", 1f,

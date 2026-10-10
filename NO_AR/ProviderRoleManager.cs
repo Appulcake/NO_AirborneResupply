@@ -37,6 +37,12 @@ internal static class ProviderRoleManager
     internal static float GetInternalFuelReserveRatio(Aircraft aircraft) =>
         GetInternalFuelReservePercent(aircraft) * 0.01f;
     
+    internal static float GetServiceRange(Aircraft provider)
+    {
+        var isHeli = provider != null && Roles.TryGetValue(provider, out var state) && state.IsHeli;
+        return Mathf.Max(1f, isHeli ? Plugin.HeliServiceRange.Value : Plugin.ServiceRange.Value);
+    }
+    
     internal static void RegisterAircraftRole(Aircraft aircraft)
     {
         if (aircraft == null || !aircraft.IsServer || Roles.ContainsKey(aircraft))
@@ -47,7 +53,8 @@ internal static class ProviderRoleManager
         {
             RegisteredAt = Time.unscaledTime,
             JsonKey = key,
-            ProviderCapable = IsConfiguredProviderType(key)
+            ProviderCapable = IsConfiguredProviderType(key),
+            IsHeli = aircraft.GetControlsFilter() is HeloControlsFilter
         });
     }
     
@@ -268,6 +275,7 @@ internal static class ProviderRoleManager
         internal bool Active;
         internal bool AssignmentSent;
         internal byte InternalFuelReservePercent;
+        internal bool IsHeli;
         internal string JsonKey = string.Empty;
         internal bool ProviderCapable;
         internal float RegisteredAt;
