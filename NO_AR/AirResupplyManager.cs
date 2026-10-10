@@ -318,7 +318,7 @@ internal static class AirResupplyManager
         if (provider.radarAlt < minRadarAlt || receiver.radarAlt < minRadarAlt)
             return false;
         
-        var serviceRange = Mathf.Max(1f, Plugin.ServiceRange.Value);
+        var serviceRange = ProviderRoleManager.GetServiceRange(provider);
         var currentDistance = Distance(provider, receiver);
         return currentDistance <= serviceRange;
     }
@@ -984,7 +984,6 @@ internal static class AirResupplyManager
     
     private static void SendHudStates()
     {
-        var maxDisplayRange = Mathf.Max(Plugin.ServiceRange.Value, Plugin.HudDisplayRange.Value);
         foreach (var aircraft in TrackedAircraft)
         {
             if (!IsValidParticipant(aircraft) || aircraft.Player?.Owner == null)
@@ -1030,6 +1029,8 @@ internal static class AirResupplyManager
                     continue;
                 
                 var distance = Distance(aircraft, candidate.Aircraft);
+                var maxDisplayRange = Mathf.Max(ProviderRoleManager.GetServiceRange(candidate.Aircraft),
+                    Plugin.HudDisplayRange.Value);
                 if (distance <= maxDisplayRange && distance < nearestDistance)
                 {
                     nearest = candidate;
@@ -1060,7 +1061,7 @@ internal static class AirResupplyManager
                 Mode = AirResupplyHudStateMessage.ReceiverMode,
                 ProviderName = nearest.Aircraft.definition?.unitName ?? nearest.Aircraft.unitName ?? "Supplier",
                 Distance = nearestDistance,
-                ServiceRange = Mathf.Max(1f, Plugin.ServiceRange.Value),
+                ServiceRange = ProviderRoleManager.GetServiceRange(nearest.Aircraft),
                 Progress = progress,
                 ServiceTime = Mathf.Max(0.1f, Plugin.ServiceTime.Value),
                 Servicing = servicing,
