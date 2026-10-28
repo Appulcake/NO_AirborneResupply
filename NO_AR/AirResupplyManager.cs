@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using NuclearOption.Networking;
 using UnityEngine;
 
 namespace NO_AR;
@@ -9,11 +10,7 @@ internal static class AirResupplyManager
     private const float OverrideRatio = -1f;
     private const float Epsilon = 0.001f;
     private const float MapStatusSyncInterval = 10f;
-    
-    // Diagnostics
-    private const bool DiagnosticLogging = false;
     private const int MaxProviderHudSessions = 5;
-    
     private static readonly HashSet<Aircraft> TrackedAircraft = [];
     private static readonly Dictionary<Aircraft, ProviderState> Providers = new();
     private static readonly Dictionary<Aircraft, ReceiverSession> ReceiverSessions = new();
@@ -23,13 +20,39 @@ internal static class AirResupplyManager
     private static float _mapStatusSyncAccumulator = MapStatusSyncInterval;
     
     // Diagnostics
-    private static void Diagnostic(string message)
+    internal const bool DiagnosticLogging = false;
+    internal static void Diagnostic(string message)
     {
         if (DiagnosticLogging)
             // ReSharper disable once HeuristicUnreachableCode
 #pragma warning disable CS0162 // Unreachable code detected
             Plugin.Logger.LogInfo($"Air Resupply Diagnostic: {message}");
 #pragma warning restore CS0162 // Unreachable code detected
+    }
+    
+    // Diagnostics
+    private static readonly Dictionary<Aircraft, float> NextNoNeedDiagnostic = new();
+    private static void DiagnoseNoServiceNeeded(Aircraft receiver)
+    {
+        var now = Time.unscaledTime;
+        if (NextNoNeedDiagnostic.TryGetValue(receiver, out var next) && now < next)
+            return;
+        
+        foreach (var provider in Providers.Values)
+        {
+            var supplier = provider.Aircraft;
+            if (supplier == null || !IsPairEligibleAndInRange(supplier, receiver))
+                continue;
+            
+            NextNoNeedDiagnostic[receiver] = now + 15f;
+            Diagnostic($"Server No Need Nearby | receiver: {Describe(receiver)} | " +
+                       $"provider: {Describe(supplier)} | distance: {Distance(supplier, receiver):F1}m | " +
+                       $"rearmCooldown: {GetRearmCooldownRemaining(receiver):F1}s");
+            AirResupplyDiagnostics.DumpStations(receiver, "Server in range no need");
+            return;
+        }
+        
+        NextNoNeedDiagnostic.Remove(receiver);
     }
     
     // Unit.InitializeUnit()
@@ -60,6 +83,7 @@ internal static class AirResupplyManager
         ReceiverSessions.Remove(aircraft);
         ProviderRoleManager.RemoveAircraftRole(aircraft);
         RearmCooldownUntil.Remove(aircraft);
+        NextNoNeedDiagnostic.Remove(aircraft);
         AircraftToRemove.Clear();
         foreach (var session in ReceiverSessions)
             if (session.Value.Provider == aircraft)
@@ -80,6 +104,7 @@ internal static class AirResupplyManager
         ReceiverSessions.Clear();
         RearmCooldownUntil.Clear();
         AircraftToRemove.Clear();
+        NextNoNeedDiagnostic.Clear();
         ProviderRoleManager.ResetServerState();
         _mapStatusSyncAccumulator = MapStatusSyncInterval;
     }
@@ -146,6 +171,7 @@ internal static class AirResupplyManager
             Providers.Remove(aircraft);
             ReceiverSessions.Remove(aircraft);
             RearmCooldownUntil.Remove(aircraft);
+            NextNoNeedDiagnostic.Remove(aircraft);
             ProviderRoleManager.RemoveAircraftRole(aircraft);
         }
         
@@ -201,6 +227,9 @@ internal static class AirResupplyManager
         
         if (!TryGetServiceNeed(receiver, out var need))
         {
+            if (DiagnosticLogging)
+                DiagnoseNoServiceNeeded(receiver);
+            
             ReceiverSessions.Remove(receiver);
             return;
         }
@@ -212,15 +241,11 @@ internal static class AirResupplyManager
             if (session is { Progress: > Epsilon })
             {
                 var oldProvider = session.Provider;
-                Diagnostic(
-                    $"Service reset mid progress! | " +
-                    $"receiver: {Describe(receiver)} | " +
-                    $"provider: {Describe(oldProvider)} | " +
-                    $"progress: {session.Progress:F1}s | " +
-                    $"distance: {Distance(oldProvider, receiver):F1}m | " +
-                    $"receiverRAlt: {receiver.radarAlt:F1}m | " +
-                    $"providerRAlt: {(oldProvider != null ? oldProvider.radarAlt : -1f):F1}m | " +
-                    $"eligible: {oldProvider != null && IsPairEligibleAndInRange(oldProvider, receiver)}");
+                Diagnostic($"Service reset mid progress! | receiver: {Describe(receiver)} | " +
+                           $"provider: {Describe(oldProvider)} | progress: {session.Progress:F1}s | " +
+                           $"distance: {Distance(oldProvider, receiver):F1}m | receiverRAlt: {receiver.radarAlt:F1}m | " +
+                           $"providerRAlt: {(oldProvider != null ? oldProvider.radarAlt : -1f):F1}m | " +
+                           $"eligible: {oldProvider != null && IsPairEligibleAndInRange(oldProvider, receiver)}");
             }
             
             ReceiverSessions.Remove(receiver);
@@ -246,17 +271,12 @@ internal static class AirResupplyManager
         // Refresh current fuel/ammo levels that might've been expended during service timer
         TryGetServiceNeed(receiver, out var completionNeed);
         
-        Diagnostic(
-            $"SERVICE COMPLETE | " +
-            $"receiver={Describe(receiver)} | " +
-            $"provider={Describe(provider.Aircraft)} | " +
-            $"progress={session.Progress:F1}s | " +
-            $"distance={Distance(provider.Aircraft, receiver):F1}m | " +
-            $"receiverAlt={receiver.radarAlt:F1}m | " +
-            $"providerAlt={provider.Aircraft.radarAlt:F1}m | " +
-            $"needsAmmo={completionNeed.NeedsAmmo} | " +
-            $"needsFuel={completionNeed.NeedsFuel} | " +
-            $"rearmCooldown={GetRearmCooldownRemaining(receiver):F1}s");
+        // Diagnostics
+        Diagnostic($"Service  Complete | receiver: {Describe(receiver)} | provider: {Describe(provider.Aircraft)} | " +
+                   $"progress: {session.Progress:F1}s | distance: {Distance(provider.Aircraft, receiver):F1}m | " +
+                   $"receiverAlt: {receiver.radarAlt:F1}m | providerAlt: {provider.Aircraft.radarAlt:F1}m | " +
+                   $"needsAmmo: {completionNeed.NeedsAmmo} | needsFuel: {completionNeed.NeedsFuel} | " +
+                   $"rearmCooldown: {GetRearmCooldownRemaining(receiver):F1}s");
         
         try
         {
@@ -425,7 +445,7 @@ internal static class AirResupplyManager
             if (info.cargo || info.nuclear || info.massPerRound <= 0f)
                 continue;
             
-            var missing = Math.Max(0, station.FullAmmo - station.GetAmmoTotal());
+            var missing = Math.Max(0, station.FullAmmo - GetEffectiveStationAmmo(station));
             if (missing > 0)
                 return true;
         }
@@ -447,8 +467,7 @@ internal static class AirResupplyManager
         var transferCost = 0f;
         
         // Diagnostics
-        var providerAmmoBefore = provider.AmmoRemainingKg;
-        var totalRounds = 0;
+        var initialAmmoKg = provider.AmmoRemainingKg;
         
         for (var i = 0; i < target.weaponStations.Count; i++)
         {
@@ -463,21 +482,34 @@ internal static class AirResupplyManager
             // Diagnostics
             var ammoField = station.Ammo;
             var ammoTotal = station.GetAmmoTotal();
+            var fullAmmo = Math.Max(0, station.FullAmmo);
             
-            var missing = Math.Max(0, station.FullAmmo - ammoTotal);
+            var missingByField = fullAmmo - Clamp(ammoField, 0, fullAmmo);
+            var missingByTotal = fullAmmo - Clamp(ammoTotal, 0, fullAmmo);
+            // var effectiveAmmo = Math.Min(Clamp(ammoField, 0, fullAmmo), Clamp(ammoTotal, 0, fullAmmo));
+            
+            var missing = Math.Max(missingByField, missingByTotal);
             
             // Diagnostics
-            if (ammoField != ammoTotal)
-                Diagnostic(
-                    $"Ammo Count Mismatch! | " +
-                    $"target: {Describe(target)} | " +
-                    $"index: {i} | " +
-                    $"weapon: {info.shortName ?? info.weaponName ?? "?"} | " +
-                    $"Ammo: {ammoField} | " +
-                    $"GetAmmoTotal: {ammoTotal} | " +
-                    $"FullAmmo: {station.FullAmmo} | " +
-                    $"Weapons: {station.Weapons?.Count ?? -1} | " +
-                    $"correctMissing: {missing}");
+            if (DiagnosticLogging)
+            {
+                try
+                {
+                    var weaponType = station.Weapons is { Count: > 0 } && station.Weapons[0] != null
+                        ? station.Weapons[0].GetType().Name : "(none)";
+                    Diagnostic($"Rearm Count Decision | target: {Describe(target)} | station: {i} | " +
+                               $"weapon: {info.shortName} | type: {weaponType} | " +
+                               $"weapons: {station.Weapons.Count} | Ammo: {ammoField} | GetAmmoTotal: {ammoTotal} | " +
+                               $"GetAmmoLoaded: {station.GetAmmoLoaded()} | FullAmmo: {fullAmmo} | " +
+                               $"missingByField: {missingByField} | missingByTotal: {missingByTotal} | " +
+                               $"selectedMissing: {missing} | " + $"source: max_deficit");
+                }
+                catch (Exception e)
+                {
+                    Plugin.Logger.LogWarning($"Air Resupply Diagnostic: Rearm Count Decision failed | station: {i} | {e}");
+                }
+                
+            }
             
             if (missing <= 0)
                 continue;
@@ -502,25 +534,21 @@ internal static class AirResupplyManager
             var rounds = Math.Min(missing, Math.Min(bySupply, byFunds));
             
             // Diagnostics
-            Diagnostic(
-                $"Rearm Station Info | " +
-                $"target: {Describe(target)} | " +
-                $"index: {i} | " +
-                $"weapon: {info.shortName ?? info.weaponName ?? "?"} | " +
-                $"Ammo: {ammoField} | " +
-                $"GetAmmoTotal: {ammoTotal} | " +
-                $"FullAmmo: {station.FullAmmo} | " +
-                $"Weapons: {station.Weapons?.Count ?? -1} | " +
-                $"missing: {missing} | " +
-                $"bySupply: {bySupply} | " +
-                $"byFunds: {byFunds} | " +
-                $"rounds: {rounds}");
+            try
+            {
+                Diagnostic($"Rearm Station Info | target: {Describe(target)} | index: {i} | " +
+                           $"weapon: {info.shortName ?? info.weaponName ?? "?"} | Ammo: {ammoField} | " +
+                           $"GetAmmoTotal: {ammoTotal} | FullAmmo: {station.FullAmmo} | " +
+                           $"Weapons: {station.Weapons?.Count ?? -1} | missing: {missing} | " +
+                           $"bySupply: {bySupply} | byFunds: {byFunds} | rounds: {rounds}");
+            }
+            catch (Exception e)
+            {
+                Plugin.Logger.LogWarning($"Air Resupply Diagnostic: Rearm Station Info failed: {e}");
+            }
             
             if (rounds <= 0)
                 continue;
-            
-            // Diagnostics
-            totalRounds += rounds;
             
             stations[i] = rounds;
             var transferredMass = rounds * info.massPerRound;
@@ -553,16 +581,22 @@ internal static class AirResupplyManager
         }
         
         // Diagnostics
-        Diagnostic(
-            $"Rearm Send Info | " +
-            $"target: {Describe(target)} | " +
-            $"provider: {Describe(provider.Aircraft)} | " +
-            $"success: {successfulRearm} | " +
-            $"rounds: {totalRounds} | " +
-            $"cost: {transferCost:F2} | " +
-            $"providerAmmo: {providerAmmoBefore:F2}->{availablePhysicalMass:F2} | " +
-            $"stationCount: {target.weaponStations.Count} | " +
-            $"stations: [{string.Join(",", stations)}]");
+        if (DiagnosticLogging)
+        {
+            long totalRounds = 0;
+            foreach (var delta in stations)
+                if (delta > 0)
+                    totalRounds += delta;
+            Diagnostic($"Rearm Transaction | target: {Describe(target)} | " +
+                       $"provider: {Describe(provider.Aircraft)} | " +
+                       $"successful: {successfulRearm} | rounds: {totalRounds} | " +
+                       $"cost: {transferCost:F2} | providerAmmo: {initialAmmoKg:F2}->{provider.AmmoRemainingKg:F2} | " +
+                       $"stations: [{string.Join(",", stations)}]");
+        }
+        
+        // Diagnostics
+        if (DiagnosticLogging)
+            AirResupplyDiagnostics.DumpStations(target, "Server Before RPC", stations);
         
         target.RpcRearm(new RearmEventArgs
         {
@@ -571,9 +605,45 @@ internal static class AirResupplyManager
         });
         
         // Diagnostics
-        Diagnostic($"Rearm RPC Sent! | target: {Describe(target)}");
+        Diagnostic($"Rearm RPC Sent | target={Describe(target)}");
+        
+        ApplyServerRearm(target, stations);
+        
+        // Diagnostics
+        if (DiagnosticLogging)
+            AirResupplyDiagnostics.DumpStations(target, "Server After Mirror", stations);
         
         return successfulRearm;
+    }
+    
+    private static void ApplyServerRearm(Aircraft target, int[] roundsByStation)
+    {
+        var manager = NetworkManagerNuclearOption.i;
+        if (manager == null || !manager.Server.Active || (manager.Client != null && manager.Client.Active))
+            return;
+        
+        var count = Math.Min(target.weaponStations.Count, roundsByStation.Length);
+        for (var i = 0; i < count; i++)
+        {
+            var rounds = roundsByStation[i];
+            if (rounds <= 0)
+                continue;
+            
+            var station = target.weaponStations[i];
+            if (station?.Weapons == null || station.Weapons.Count == 0)
+                continue;
+            
+            if (AirResupplyGunSync.TryGetSingleGun(station, out var gun))
+            {
+                var before = station.Ammo.Clamp(0, station.FullAmmo);
+                var desired = (int)Math.Min(station.FullAmmo, (long)before + rounds);
+                AirResupplyGunSync.SetGunAmmo(station, gun, desired);
+            }
+            else
+            {
+                station.Rearm(rounds);
+            }
+        }
     }
     
     private static void PerformAirborneService(ProviderState provider, Aircraft target, ServiceNeed need)
@@ -589,11 +659,6 @@ internal static class AirResupplyManager
                 Diagnostic($"Rearm Cooldown Started! | target: {Describe(target)} | " +
                            $"seconds: {Plugin.RearmCooldownSeconds.Value:F1}");
             }
-            
-            /*
-            if (PerformAirborneRearm(provider, target))
-                StartRearmCooldown(target);
-            */
         }
         
         if (need.NeedsFuel && Plugin.EnableFuelRefuel.Value && provider.GetFuelAvailability().Total > Epsilon)
@@ -912,6 +977,27 @@ internal static class AirResupplyManager
         return rounds <= 0d ? 0 : (int)rounds;
     }
     
+    private static int GetEffectiveStationAmmo(WeaponStation station)
+    {
+        var full = Math.Max(0, station.FullAmmo);
+        var stationAmmo = station.Ammo.Clamp(0, full);
+        var weaponAmmo = station.GetAmmoTotal().Clamp(0, full);
+        
+        return Math.Min(stationAmmo, weaponAmmo);
+    }
+    
+    // Source - https://stackoverflow.com/a/2683487
+    // Posted by Lee, modified by community. See post 'Timeline' for change history
+    // Retrieved 2026-10-11, Licence - CC BY-SA 4.0
+    
+    private static T Clamp<T>(this T val, T min, T max) where T : IComparable<T>
+    {
+        if (val.CompareTo(min) < 0) return min;
+        else if(val.CompareTo(max) > 0) return max;
+        else return val;
+    }
+
+    
     private static void TryGroundRefill(ProviderState provider)
     {
         if (provider.Aircraft == null)
@@ -1132,7 +1218,7 @@ internal static class AirResupplyManager
         GetProviderCargoCapacity(aircraft, out ammoKg, out fuelCargoLitres);
     }
     
-    internal static void GetProviderCargoCapacity(Aircraft aircraft, out float ammoKg, out float fuelCargoLitres)
+    private static void GetProviderCargoCapacity(Aircraft aircraft, out float ammoKg, out float fuelCargoLitres)
     {
         ammoKg = 0f;
         fuelCargoLitres = 0f;

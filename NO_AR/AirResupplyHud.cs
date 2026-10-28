@@ -48,6 +48,10 @@ internal static class AirResupplyHud
         _state = state;
         _receivedAt = now;
         _nextDynamicRefresh = 0f;
+        
+        // Diagnostics
+        AirResupplyDiagnostics.OnClientHudState(state);
+        
         if (state is { Visible: true, Mode: AirResupplyHudStateMessage.ReceiverMode })
             _localRearmCooldownUntil = state.RearmCooldownRemaining > 0.5f
                 ? now + state.RearmCooldownRemaining
@@ -70,6 +74,9 @@ internal static class AirResupplyHud
     
     internal static void Clear()
     {
+        // Diagnostics
+        AirResupplyDiagnostics.ResetClientNearby();
+        
         _state = AirResupplyHudStateMessage.Hidden;
         _extraState = default;
         _extraReceivedAt = -1000f;
@@ -154,6 +161,9 @@ internal static class AirResupplyHud
         _extraReceivedAt = -1000f;
         _receivedAt = -1000f;
         _localRearmCooldownUntil = -1000f;
+        
+        // Diagnostics
+        AirResupplyDiagnostics.ResetClientNearby();
     }
     
     // FuelGauge.RefreshSettings()
@@ -231,6 +241,9 @@ internal static class AirResupplyHud
         _extraReceivedAt = -1000f;
         _receivedAt = -1000f;
         _localRearmCooldownUntil = -1000f;
+        
+        // Diagnostics
+        AirResupplyDiagnostics.ResetClientNearby();
     }
     
     private static void TryCreateHudText()
