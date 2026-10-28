@@ -14,8 +14,8 @@ internal static class BoteCompatibility
             return;
         
         _resolved = true;
-        _shipBridgeType = AccessTools.TypeByName("NOComponentWIP.ShipPartBridge") ??
-                          AccessTools.TypeByName("BoscaliOceanTrainingExercise.ShipPartBridge");
+        _shipBridgeType = AccessTools.TypeByName("BoscaliOceanTrainingExercise.ShipPartBridge") ??
+                          AccessTools.TypeByName("NOComponentWIP.ShipPartBridge");
     }
     
     internal static bool IsBoteShip(Aircraft aircraft)
